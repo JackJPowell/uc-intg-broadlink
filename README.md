@@ -9,9 +9,9 @@
 This integration is based on the [broadlink](https://github.com/mjg59/python-broadlink) library and uses the
 [uc-integration-api](https://github.com/aitatoi/integration-python-library) to communicate with the Remote Two/3.
 
-A [Remote](https://github.com/unfoldedcircle/core-api/blob/main/doc/entities/entity_remote.md) is exposed to the Remote Two/3.
+A [Remote](https://github.com/unfoldedcircle/core-api/blob/main/doc/entities/entity_remote.md) and [Media Player](https://github.com/unfoldedcircle/core-api/blob/main/doc/entities/entity_media_player.md) are created by this integration.
 
-Supported versions:
+Supported devices:
 - Broadlink devices such as the RM4
 
 Supported attributes:
@@ -23,22 +23,24 @@ Supported commands:
 
 ## How to Use
 
-There are three main modes when interacting with the integration: Learning, Deleting and Sending commmands. Start by including the remote and media player in an activity.
-Then place a media player in the bottom third of the screen. It should be at least 3 rows tall. <insert Picture>
+There are three main modes when interacting with the integration: Learning, Deleting and Sending commmands. Start by including the remote and media player in an activity. Then place a media player in the bottom third of the screen. It should be at least 3 rows tall. All commands referenced below are case insensitive. I've made everything uppercase for clarity, but it's not required. This means that you can't have devices or commands that are only differentiated by case.
+
+<img height="250" alt="CleanShot 2025-08-18 at 15 30 25" src="https://github.com/user-attachments/assets/b05448e9-bb38-49a4-a6dd-e25997e37361" />
 
 
-
-#### Learning
+### Learning
 
 Let's start by learning a new command.
 1. Place a new button on the screen and select `Send Command`.
-2. `Command` will take a set of separated by `:`.
+2. `Command` will take a set of options separated by `:`.
   2.1. `MODE`:`FREQUENCY_TYPE`:`DEVICE`:`COMMAND`  e.g. `LEARN:RF:FAN:ON` or `LEARN:IR:RECEIVER:TOGGLE`
   2.2. Once clicked, the media player you placed on the screen will walk you through the learning process. (Must be done on device)
   2.3. Specifically for RF, you can optionally include the frequency at the end of the command and skip the frequency scanning process. `LEARN:RF:FAN:ON:332.0`
-3. Once learned, the included media player entity will update its `source list` will your new command.
-4. To test, include a new button tied to the media player and select `Input Source` then pick your command from the list.
-  4.1. You can also use the remote entity's `Send Command` option: `SEND`:`DEVICE`:`COMMAND` e.g. `SEND:FAN:ON`
+3. Once learned, the included media player entity will update its `source list` with your new command.
+
+https://github.com/user-attachments/assets/aa6e8d70-9d75-4ca8-8861-e6242c4c4fb9
+
+
 
 ### Sending
 
@@ -47,8 +49,9 @@ There are two ways to send a command: Using the Media Player Source List or with
 1. The included media player entity will update its `source list` will your new command.
 2. Include a new button tied to the media player and select `Input Source` then pick your command from the list.
 3. You can also use the remote entity's `Send Command` option: `SEND`:`DEVICE`:`COMMAND` e.g. `SEND:FAN:ON`
+  3.1 For sending, you can also exclude the `SEND` keyword. e.g. `FAN:ON` 
 
-#### Deleting
+### Deleting
 
 Command cleanup follows a similiar pattern to learning.
 1. Place a new button on the screen and select `Send Command`.
