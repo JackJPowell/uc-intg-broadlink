@@ -15,6 +15,6 @@ ENV UC_INTEGRATION_INTERFACE="0.0.0.0"
 ENV UC_INTEGRATION_HTTP_PORT="9090"
 
 ENV UC_CONFIG_HOME="/config"
-LABEL org.opencontainers.image.source https://github.com/jackjpowell/uc-intg-yamaha-avr
+LABEL org.opencontainers.image.source https://github.com/jackjpowell/uc-intg-broadlink
 
-CMD ["python3", "-u", "intg-yamaha-avr/driver.py"]
+CMD ["python3", "-u", "intg-broadlink/driver.py"]
