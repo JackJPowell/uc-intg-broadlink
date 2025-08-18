@@ -1,0 +1,149 @@
+[![Discord](https://badgen.net/discord/online-members/zGVYf58)](https://discord.gg/zGVYf58)
+![GitHub Release](https://img.shields.io/github/v/release/jackjpowell/uc-intg-broadlink)
+![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/jackjpowell/uc-intg-broadlink/total)
+<a href="#"><img src="https://img.shields.io/maintenance/yes/2025.svg"></a>
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy_Me_A_Coffee&nbsp;☕-FFDD00?logo=buy-me-a-coffee&logoColor=white&labelColor=grey)](https://buymeacoffee.com/jackpowell)
+
+# Broadlink integration for Remote Two/3
+
+This integration is based on the [broadlink](https://github.com/mjg59/python-broadlink) library and uses the
+[uc-integration-api](https://github.com/aitatoi/integration-python-library) to communicate with the Remote Two/3.
+
+A [Remote](https://github.com/unfoldedcircle/core-api/blob/main/doc/entities/entity_remote.md) is exposed to the Remote Two/3.
+
+Supported versions:
+- Broadlink devices such as the RM4
+
+Supported attributes:
+- State (on, off, unknown)
+
+Supported commands:
+- Send Command
+
+
+## How to Use
+
+There are three main modes when interacting with the integration: Learning, Deleting and Sending commmands. Start by including the remote and media player in an activity.
+Then place a media player in the bottom third of the screen. It should be at least 3 rows tall. <insert Picture>
+
+
+
+#### Learning
+
+Let's start by learning a new command.
+1. Place a new button on the screen and select `Send Command`.
+2. `Command` will take a set of separated by `:`.
+  2.1. `MODE`:`FREQUENCY_TYPE`:`DEVICE`:`COMMAND`  e.g. `LEARN:RF:FAN:ON` or `LEARN:IR:RECEIVER:TOGGLE`
+  2.2. Once clicked, the media player you placed on the screen will walk you through the learning process. (Must be done on device)
+  2.3. Specifically for RF, you can optionally include the frequency at the end of the command and skip the frequency scanning process. `LEARN:RF:FAN:ON:332.0`
+3. Once learned, the included media player entity will update its `source list` will your new command.
+4. To test, include a new button tied to the media player and select `Input Source` then pick your command from the list.
+  4.1. You can also use the remote entity's `Send Command` option: `SEND`:`DEVICE`:`COMMAND` e.g. `SEND:FAN:ON`
+
+### Sending
+
+There are two ways to send a command: Using the Media Player Source List or with the Remote Entity's `Send Command` option.
+
+1. The included media player entity will update its `source list` will your new command.
+2. Include a new button tied to the media player and select `Input Source` then pick your command from the list.
+3. You can also use the remote entity's `Send Command` option: `SEND`:`DEVICE`:`COMMAND` e.g. `SEND:FAN:ON`
+
+#### Deleting
+
+Command cleanup follows a similiar pattern to learning.
+1. Place a new button on the screen and select `Send Command`.
+2. `Command` will take a set of separated by `:`.
+  2.1. `MODE`:`DEVICE`:`COMMAND`  e.g. `DELETE:FAN:ON` or `REMOVE:RECEIVER`
+    2.1.1 `COMMAND` is optional. If not supplied, the entire `DEVICE` will be removed
+  2.2. Notice the multiple examples. You can use the `DELETE` or `REMOVE` keyword and you can remove individual commands or entire devices
+
+## Network
+
+- The Broadlink device must be on the same network subnet as the Remote. 
+- When using DHCP: a static IP address reservation for the Broadlink device(s) is recommended.
+
+## Broadlink device
+
+- A Broadlink that is network enabled is required to use the integration. Please refer to the broadlink documentation for additional information on supported models. 
+
+## Usage
+
+### Docker
+```
+docker run -d \
+  --name broadlink \
+  --network host \
+  -v $(pwd)/<local_directory>:/config \
+  --restart unless-stopped \
+  -e UC_INTEGRATION_HTTP_PORT=9090 \
+  ghcr.io/jackjpowell/uc-intg-broadlink:latest
+```
+
+### Docker Compose
+
+```
+  broadlink:
+    container_name: broadlink
+    image: ghcr.io/jackjpowell/uc-intg-broadlink:latest
+    network_mode: host
+    volumes:
+      - ./<local_directory>:/config
+    environment:
+      - UC_INTEGRATION_HTTP_PORT=9090
+    restart: unless-stopped
+```
+
+### Install on Remote
+
+- Download tar.gz file from Releases section of this repository
+- Upload the file to the remove via the integrations tab (Requires Remote Beta)
+
+### Setup (For Development)
+
+- Requires Python 3.11
+- Install required libraries:  
+  (using a [virtual environment](https://docs.python.org/3/library/venv.html) is highly recommended)
+```shell
+pip3 install -r requirements.txt
+```
+
+For running a separate integration driver on your network for Remote Two/3, the configuration in file
+[driver.json](driver.json) needs to be changed:
+
+- Change `name` to easily identify the driver for discovery & setup  with Remote Two/3 or the web-configurator.
+- Optionally add a `"port": 8090` field for the WebSocket server listening port.
+    - Default port: `9090`
+    - This is also overrideable with environment variable `UC_INTEGRATION_HTTP_PORT`
+
+### Run
+
+```shell
+UC_CONFIG_HOME=./ python3 intg-broadlink/driver.py
+```
+
+See available [environment variables](https://github.com/unfoldedcircle/integration-python-library#environment-variables)
+in the Python integration library to control certain runtime features like listening interface and configuration directory.
+
+The configuration file is loaded & saved from the path specified in the environment variable `UC_CONFIG_HOME`.
+Otherwise, the `HOME` path is used or the working directory as fallback.
+
+The client name prefix used for pairing can be set in ENV variable `UC_CLIENT_NAME`. The hostname is used by default.
+
+## Versioning
+
+We use [SemVer](http://semver.org/) for versioning. For the versions available, see the
+[tags and releases in this repository](https://github.com/jackjpowell/uc-intg-broadlink/releases).
+
+## Changelog
+
+The major changes found in each new release are listed in the [changelog](CHANGELOG.md)
+and under the GitHub [releases](https://github.com/jackjpowell/uc-intg-broadlink/releases).
+
+## Contributions
+
+Please read the [contribution guidelines](CONTRIBUTING.md) before opening a pull request.
+
+## License
+
+This project is licensed under the [**Mozilla Public License 2.0**](https://choosealicense.com/licenses/mpl-2.0/).
+See the [LICENSE](LICENSE) file for details.
