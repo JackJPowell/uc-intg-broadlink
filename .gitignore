@@ -9,3 +9,7 @@ wheels/
 # Virtual environments
 .venv
 uv.lock
+
+# Test and example files
+test_*.py
+example_*.py

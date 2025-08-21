@@ -18,6 +18,13 @@ from config import BroadlinkDevice
 from pyee.asyncio import AsyncIOEventEmitter
 from ucapi import StatusCodes
 
+try:
+    from ir_converter import hex_to_broadlink, pronto_to_broadlink
+except ImportError:
+    # IR converter not available
+    hex_to_broadlink = None
+    pronto_to_broadlink = None
+
 _LOG = logging.getLogger(__name__)
 
 BACKOFF_MAX = 30
@@ -199,6 +206,48 @@ class Broadlink:
                 err,
             )
             raise Exception(err) from err
+
+    def convert_ir_code(self, code: str, code_type: str = "auto") -> str:
+        """
+        Convert HEX or PRONTO IR codes to Broadlink format.
+
+        Args:
+            code: IR code string (HEX or PRONTO format)
+            code_type: Type of code ("hex", "pronto", or "auto" for auto-detection)
+
+        Returns:
+            str: Base64 encoded Broadlink IR code
+
+        Raises:
+            ValueError: If code format is invalid or conversion functions not available
+        """
+        if hex_to_broadlink is None or pronto_to_broadlink is None:
+            raise ValueError("IR converter functions not available")
+
+        code = code.strip()
+        if not code:
+            raise ValueError("IR code cannot be empty")
+
+        # Auto-detect code type if not specified
+        if code_type == "auto":
+            if code.startswith("0000 ") or " " in code:
+                code_type = "pronto"
+            else:
+                code_type = "hex"
+
+        try:
+            if code_type.lower() == "hex":
+                broadlink_data = hex_to_broadlink(code)
+            elif code_type.lower() == "pronto":
+                broadlink_data = pronto_to_broadlink(code)
+            else:
+                raise ValueError(f"Unsupported code type: {code_type}")
+
+            return b64encode(broadlink_data).decode("utf8")
+
+        except Exception as e:
+            _LOG.error("[%s] Error converting IR code: %s", self.log_id, e)
+            raise ValueError(f"Failed to convert IR code: {e}") from e
 
     async def learn_ir_command(self, input: str) -> None:
         """Learn a command."""
