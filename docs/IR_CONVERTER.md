@@ -6,25 +6,15 @@ This module provides functions to convert HEX and PRONTO IR codes into the Broad
 
 The IR converter allows you to convert infrared remote control codes from common formats (HEX and PRONTO) into the Broadlink device format. This is useful when you have IR codes from other sources and want to use them with Broadlink devices.
 
-## Available Implementations
-
-### Python (Complete)
-- Full HEX, PRONTO, and custom NEC format support
-- Integration with Broadlink class
-- Comprehensive error handling and validation
-
-### JavaScript (HEX only)
-- Browser and Node.js compatible
-- HEX to Broadlink conversion
-- Base64 encoding/decoding utilities
-- Packet validation
-
 ## Supported Formats
 
 ### HEX Format
-Raw hexadecimal IR pulse data. Example:
+Raw hexadecimal IR pulse data. Supports various separator formats:
 ```
 26001A00AC005D005D00180018005D005D005D0018001800180018005D001800000D05
+26 00 1A 00 AC 00 5D 00 5D 00 18 00 18 00 5D 00 5D 00 5D 00
+26-00-1A-00-AC-00-5D-00-5D-00-18-00-18-00-5D-00-5D-00-5D-00
+26:00:1A:00:AC:00:5D:00:5D:00:18:00:18:00:5D:00:5D:00:5D:00
 ```
 
 ### PRONTO Format
@@ -41,29 +31,20 @@ Philips Pronto remote control format. Example:
 from intg_broadlink.ir_converter import hex_to_broadlink, pronto_to_broadlink
 import base64
 
-# Convert HEX code
+# Convert HEX code (supports various formats)
 hex_code = "26001A00AC005D005D00180018005D005D005D0018001800180018005D001800000D05"
 broadlink_data = hex_to_broadlink(hex_code)
 b64_code = base64.b64encode(broadlink_data).decode()
+
+# Also works with separators
+hex_with_spaces = "26 00 1A 00 AC 00 5D 00 5D 00"
+hex_with_dashes = "26-00-1A-00-AC-00-5D-00-5D-00"
+hex_with_colons = "26:00:1A:00:AC:00:5D:00:5D:00"
 
 # Convert PRONTO code
 pronto_code = "0000 006C 0022 0002 015B 00AD ..."
 broadlink_data = pronto_to_broadlink(pronto_code)
 b64_code = base64.b64encode(broadlink_data).decode()
-```
-
-### JavaScript - HEX Conversion
-
-```javascript
-const converter = new BroadlinkIRConverter();
-
-// Convert HEX code
-const hexCode = "26001A00AC005D005D00180018005D005D005D0018001800180018005D001800000D05";
-const broadlinkData = converter.hexToBroadlink(hexCode);
-const b64Code = converter.bytesToBase64(broadlinkData);
-
-// Validate packet
-const isValid = converter.validateBroadlinkPacket(broadlinkData);
 ```
 
 ### Using Broadlink Class Integration
@@ -105,7 +86,7 @@ The converter outputs data in the Broadlink IR raw format, which consists of:
 Converts a HEX IR code string to Broadlink format.
 
 **Parameters:**
-- `hex_code`: Hexadecimal string (even length, no spaces)
+- `hex_code`: Hexadecimal string (supports various separators: spaces, dashes, colons, commas)
 
 **Returns:** Raw Broadlink IR data as bytes
 
@@ -139,9 +120,8 @@ The converter functions include comprehensive error handling:
 
 ## Examples
 
-See the following files for complete usage examples:
+See the following file for complete usage examples:
 - `example_ir_converter.py` - Python examples
-- `ir_converter.js` - JavaScript examples (run with `node ir_converter.js`)
 
 ## Testing
 
@@ -152,17 +132,10 @@ python test_ir_converter.py
 python test_integration.py
 ```
 
-### JavaScript Tests
-Run the JavaScript test suite:
-```bash
-node test_ir_converter.js
-```
-
 ### Examples
-Run the example scripts:
+Run the example script:
 ```bash
 python example_ir_converter.py
-node ir_converter.js
 ```
 
 ## Integration Notes

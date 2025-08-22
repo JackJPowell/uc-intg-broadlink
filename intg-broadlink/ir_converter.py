@@ -161,8 +161,17 @@ def hex_to_broadlink(hex_code: str) -> bytes:
     if not hex_code:
         raise ValueError("HEX code cannot be empty")
 
-    # Remove any whitespace and ensure even length
-    hex_code = hex_code.replace(" ", "").replace("\n", "").replace("\t", "")
+    # Check for invalid characters before cleaning
+    import re
+    invalid_chars = re.findall(r'[^0-9a-fA-F\s\-:,]', hex_code)
+    if invalid_chars:
+        raise ValueError(f"Invalid HEX code format: contains invalid characters: {set(invalid_chars)}")
+
+    # Clean hex string - remove common separators and whitespace
+    hex_code = re.sub(r'[^0-9a-fA-F]', '', hex_code)
+    
+    if len(hex_code) == 0:
+        raise ValueError("HEX code must contain valid hexadecimal characters")
     if len(hex_code) % 2 != 0:
         raise ValueError("HEX code must have even number of characters")
 
@@ -200,6 +209,10 @@ def pronto_to_broadlink(pronto_code: str) -> bytes:
 
     if len(pronto_data) < 4:
         raise ValueError("PRONTO code too short, minimum 4 values required")
+    
+    # Validate PRONTO format (learned format 0000 only) - but be lenient for compatibility
+    if pronto_data[0] != 0x0000:
+        _LOG.warning("PRONTO: only learned format 0000 fully supported, got format %04X", pronto_data[0])
 
     # Extract PRONTO header
     frequency_code = pronto_data[1]
@@ -215,10 +228,11 @@ def pronto_to_broadlink(pronto_code: str) -> bytes:
             f"PRONTO code data too short, expected {expected_length} values"
         )
 
+    # Use only the expected number of pulse values (be lenient about extra data)
+    pulse_data = pulse_data[:expected_length]
+
     # Convert PRONTO timings to Broadlink format
-    broadlink_data = _pronto_to_broadlink_pulses(
-        pulse_data[:expected_length], frequency_code
-    )
+    broadlink_data = _pronto_to_broadlink_pulses(pulse_data, frequency_code)
 
     return _create_broadlink_packet(broadlink_data)
 
