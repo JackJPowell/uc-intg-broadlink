@@ -15,7 +15,7 @@ BROADLINK_TICK = 32.84  # microseconds per tick
 IR_COMMAND_TYPE = 0x26  # Command type for IR
 
 
-def custom_to_broadlink(custom_code: str) -> str:
+def custom_to_broadlink(custom_code: str) -> bytes:
     """
     Convert custom semicolon-separated IR code to Broadlink format.
 
@@ -26,7 +26,7 @@ def custom_to_broadlink(custom_code: str) -> str:
         custom_code: Custom format IR code (e.g., "3;0x1FE50AF;32;0")
 
     Returns:
-        str: Broadlink format IR code
+        bytes: Broadlink format IR code
 
     Raises:
         ValueError: If custom_code is invalid or unsupported protocol
@@ -57,7 +57,7 @@ def custom_to_broadlink(custom_code: str) -> str:
         raise ValueError(f"Unsupported protocol: {protocol}")
 
 
-def _nec_to_broadlink(nec_value: int, bits: int = 32, repeat: int = 0) -> str:
+def _nec_to_broadlink(nec_value: int, bits: int = 32, repeat: int = 0) -> bytes:
     """
     Convert NEC protocol value to Broadlink format.
     Converts a 32-bit NEC protocol value into PRONTO format for Broadlink IR devices.
