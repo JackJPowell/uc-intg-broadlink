@@ -9,11 +9,10 @@
 This integration is based on the [broadlink](https://github.com/mjg59/python-broadlink) library and uses the
 [uc-integration-api](https://github.com/aitatoi/integration-python-library) to communicate with the Remote Two/3.
 
-A [Remote](https://github.com/unfoldedcircle/core-api/blob/main/doc/entities/entity_remote.md) is created that allows you to learn and send commands learned by your broadlink device.
-
-A [Media Player](https://github.com/unfoldedcircle/core-api/blob/main/doc/entities/entity_media_player.md) is created that allows you to easily reference and send commands learned through your broadlink device.
-
-An [IR Emitter](https://github.com/unfoldedcircle/core-api/blob/main/doc/entities/entity_ir_emitter.md) is created that allows you to send commands learned through the standard Unfolded Circle IR creation process. This will also work for any predefined codesets provided by UC. 
+Entities:
+- [Remote](https://github.com/unfoldedcircle/core-api/blob/main/doc/entities/entity_remote.md)
+- [Media Player](https://github.com/unfoldedcircle/core-api/blob/main/doc/entities/entity_media_player.md)
+- [IR Emitter](https://github.com/unfoldedcircle/core-api/blob/main/doc/entities/entity_ir_emitter.md)
 
 Supported devices:
 - Broadlink devices such as the RM4 Pro
@@ -25,16 +24,22 @@ Supported commands:
 - Send Command
 - Send IR
 
-## Getting Started
+# Getting Started
 
-There are two ways to get started with this integration:
+There are two ways to get started
 
-1. Use an Unfolded Circle Dock to define a custom code set and learn your IR commands. This will create IR entities that you can reference in your activities. This is the preferred way to get started. <insert picture>
-2. Use your broadlink to learn commands and leverage sources in the included media player to send those commands. (This is the only way to learn RF commands)
+## Option 1
+1. Use an Unfolded Circle Dock to define a custom code set and learn your IR commands. This will create IR entities that you can reference in your activities. This is the preferred way to get started.
+   <img width="1514" height="486" alt="CleanShot 2025-08-22 at 16 53 26" src="https://github.com/user-attachments/assets/5f858d3c-1d3a-49fc-9819-d12ae79fbe58" />
 
 If you go with `option 1`, you will follow the standard IR learning process for the Unfolded Circle Dock. During this process, select your broadlink device as the Infrared output device. Continue by including IR entity in your activity and finish by mapping it to your buttons. 
 
-If you go with `option 2`, please continue reading.
+### Supported formats for Option 1:
+- Pronto
+- NEC `<protocol>;<hex-ir-code>;<bits>;<repeat-count>` E.g. `3;0x1FEF807;32;0` (The leading 3 specifies NEC format) (Displayed as HEX in the Web Configurator)
+- HEX (Currently untested)
+
+## Option 2
 
 ## How to Use the custom learning and sending commands
 
@@ -53,6 +58,10 @@ Let's start by learning a new command.
 3. Once learned, the included media player entity will update its `source list` with your new command.
 
 https://github.com/user-attachments/assets/aa6e8d70-9d75-4ca8-8861-e6242c4c4fb9
+
+### Supported formats for Option 1:
+- Full IR support - Broadlink device dependent
+- RF 310Mhz - 433Mhz
 
 ### Sending
 
