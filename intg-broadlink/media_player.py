@@ -73,7 +73,9 @@ class BroadlinkMediaPlayer(MediaPlayer):
         try:
             match cmd_id:
                 case media_player.Commands.SELECT_SOURCE:
-                    await self._device.send_command(params.get("source"))
+                    await self._device.send_command(
+                        predefined_code=params.get("source")
+                    )
                 case media_player.Commands.SELECT_SOUND_MODE:
                     pass
                 # --- simple commands ---

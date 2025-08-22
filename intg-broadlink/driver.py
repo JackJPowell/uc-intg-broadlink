@@ -11,6 +11,7 @@ import logging
 import os
 import sys
 from typing import Any
+from enum import Enum
 
 import config
 import setup
@@ -20,7 +21,15 @@ from ucapi import media_player
 from media_player import BroadlinkMediaPlayer
 from remote import BroadlinkRemote
 from config import BroadlinkDevice, device_from_entity_id
+from ir_emitter import BroadlinkIREmitter
 import rm
+
+
+class AdditionalEntityTypes(str, Enum):
+    """Additional entity types for the integration."""
+
+    IR_EMITTER = "ir_emitter"
+
 
 _LOG = logging.getLogger("driver")  # avoid having __main__ in log messages
 if sys.platform == "win32":
@@ -153,6 +162,11 @@ async def on_device_connected(device_id: str):
             api.configured_entities.update_attributes(
                 entity_id, {ucapi.remote.Attributes.STATE: state}
             )
+
+        elif configured_entity.entity_type == AdditionalEntityTypes.IR_EMITTER:
+            api.configured_entities.update_attributes(
+                entity_id, {ucapi.remote.Attributes.STATE: state}
+            )
     await api.set_device_state(ucapi.DeviceStates.CONNECTED)
 
 
@@ -201,6 +215,12 @@ async def on_device_connection_error(device_id: str, message):
                 {ucapi.remote.Attributes.STATE: ucapi.remote.States.UNAVAILABLE},
             )
 
+        elif configured_entity.entity_type == AdditionalEntityTypes.IR_EMITTER:
+            api.configured_entities.update_attributes(
+                entity_id,
+                {ucapi.remote.Attributes.STATE: ucapi.remote.States.UNAVAILABLE},
+            )
+
     await api.set_device_state(ucapi.DeviceStates.ERROR)
 
 
@@ -237,6 +257,8 @@ async def on_device_update(entity_id: str, update: dict[str, Any] | None) -> Non
         if isinstance(configured_entity, BroadlinkMediaPlayer):
             target_entity = api.available_entities.get(identifier)
         elif isinstance(configured_entity, BroadlinkRemote):
+            target_entity = api.available_entities.get(identifier)
+        elif isinstance(configured_entity, BroadlinkIREmitter):
             target_entity = api.available_entities.get(identifier)
 
         if "state" in update:
@@ -341,6 +363,7 @@ def _register_available_entities(
     entities = [
         BroadlinkMediaPlayer(device_config, device),
         BroadlinkRemote(device_config, device),
+        BroadlinkIREmitter(device_config, device),
     ]
     for entity in entities:
         if api.available_entities.contains(entity.id):
@@ -356,7 +379,11 @@ def _entities_from_device_id(device_id: str) -> list[str]:
     :param device_id: the device identifier
     :return: list of entity identifiers
     """
-    return [f"media_player.{device_id}", f"remote.{device_id}"]
+    return [
+        f"media_player.{device_id}",
+        f"remote.{device_id}",
+        f"ir_emitter.{device_id}",
+    ]
 
 
 def on_device_added(device: BroadlinkDevice) -> None:

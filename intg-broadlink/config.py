@@ -21,7 +21,12 @@ _CFG_FILENAME = "config.json"
 
 def create_entity_id(device_id: str, entity_type: EntityTypes) -> str:
     """Create a unique entity identifier for the given receiver and entity type."""
-    return f"{entity_type.value}.{device_id}"
+    if type(entity_type) is EntityTypes:
+        entity_type_value = entity_type.value
+    else:
+        entity_type_value = str(entity_type)
+
+    return f"{entity_type_value}.{device_id}"
 
 
 def device_from_entity_id(entity_id: str) -> str | None:

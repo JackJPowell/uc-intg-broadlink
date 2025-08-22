@@ -6,11 +6,11 @@ Remote entity functions.
 
 import logging
 from typing import Any
-
+from enum import Enum
 from config import BroadlinkDevice, create_entity_id
-from ucapi import EntityTypes, Remote, StatusCodes
+from ucapi import StatusCodes, Entity
 from ucapi.media_player import States as MediaStates
-from ucapi.remote import Attributes, Commands, Features
+from ucapi.remote import Attributes, Commands
 from ucapi.remote import States as RemoteStates
 import rm
 
@@ -26,21 +26,32 @@ BROADLINK_REMOTE_STATE_MAPPING = {
 }
 
 
-class BroadlinkRemote(Remote):
-    """Representation of a Broadlink Remote entity."""
+class EntityTypes(str, Enum):
+    """Entity types."""
+
+    IR_EMITTER = "ir_emitter"
+
+
+class BroadlinkIREmitter(Entity):
+    """Representation of a Broadlink IR Emitter entity."""
 
     def __init__(self, config_device: BroadlinkDevice, device: rm.Broadlink):
         """Initialize the class."""
         self._device: rm.Broadlink = device
-        _LOG.debug("Broadlink Remote init")
-        entity_id = create_entity_id(config_device.identifier, EntityTypes.REMOTE)
-        features = [Features.SEND_CMD]
+        _LOG.debug("Broadlink IR Emitter init")
+        entity_id = create_entity_id(config_device.identifier, "ir_emitter")
+        features = ["send_ir", "learn_ir"]
         super().__init__(
             entity_id,
-            f"{config_device.name} Remote",
+            f"{config_device.name} IR Emitter",
+            EntityTypes.IR_EMITTER,
             features,
             attributes={
                 Attributes.STATE: device.state,
+            },
+            options={
+                "ir_formats": ["PRONTO", "HEX"],
+                "ports": [{"id": "main", "name": "Main"}],
             },
             cmd_handler=self.command,
         )
@@ -94,37 +105,11 @@ class BroadlinkRemote(Remote):
         else:
             repeat = 1
 
-        if cmd_id == Commands.SEND_CMD:
-            command_or_status = self._get_command_or_status_code(
-                cmd_id, params.get("command", "")
+        if cmd_id == "send_ir":
+            code = self._device.convert_ir_code(
+                params.get("code"), params.get("format")
             )
-            if isinstance(command_or_status, StatusCodes):
-                return command_or_status
-
-            success = True
-            action = command_or_status.split(":")[0]
-            for _ in range(0, repeat):
-                match action.upper():
-                    case "LEARN":
-                        mode = command_or_status.split(":")[1]
-                        match mode.upper():
-                            case "IR":
-                                await self._device.learn_ir_command(command_or_status)
-                                return StatusCodes.OK
-                            case "RF":
-                                await self._device.learn_rf_command(command_or_status)
-                    case "REMOVE" | "DELETE":
-                        await self._device.remove_command(
-                            command_or_status.split(":", 1)[1]
-                        )
-                    case "SEND":
-                        await self._device.send_command(
-                            predefined_code=command_or_status.split(":", 1)[1]
-                        )
-                    case _:
-                        await self._device.send_command(
-                            predefined_code=command_or_status
-                        )
+            await self._device.send_command(code=code)
             return StatusCodes.OK
 
         if cmd_id == Commands.SEND_CMD_SEQUENCE:
@@ -137,9 +122,7 @@ class BroadlinkRemote(Remote):
                     if isinstance(command_or_status, StatusCodes):
                         success = False
                     else:
-                        res = await self._device.send_command(
-                            predefined_code=command_or_status
-                        )
+                        res = await self._device.send_command(code=command_or_status)
                         if res != StatusCodes.OK:
                             success = False
             if success:

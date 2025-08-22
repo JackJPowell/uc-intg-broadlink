@@ -17,13 +17,7 @@ from broadlink.exceptions import BroadlinkException, ReadError, StorageError
 from config import BroadlinkDevice
 from pyee.asyncio import AsyncIOEventEmitter
 from ucapi import StatusCodes
-
-try:
-    from ir_converter import hex_to_broadlink, pronto_to_broadlink
-except ImportError:
-    # IR converter not available
-    hex_to_broadlink = None
-    pronto_to_broadlink = None
+from ir_converter import hex_to_broadlink, pronto_to_broadlink
 
 _LOG = logging.getLogger(__name__)
 
@@ -174,7 +168,7 @@ class Broadlink:
             _LOG.error("[%s] Connection error: %s", self.log_id, err)
             self._state = PowerState.OFF
 
-    async def send_command(self, input: str) -> str:
+    async def send_command(self, predefined_code: str = None, code: str = None) -> str:
         """Send a command to the Broadlink."""
         update = {}
         self.events.emit(
@@ -185,27 +179,40 @@ class Broadlink:
                 "artist": "",
             },
         )
-        device, command = input.split(":")
-        code = BroadlinkConfig.devices.get_code(
-            self._device.identifier, device.lower(), command.lower()
-        )
-
-        try:
+        if predefined_code:
+            device, command = predefined_code.split(":")
+            code = BroadlinkConfig.devices.get_code(
+                self._device.identifier, device.lower(), command.lower()
+            )
             if not code:
                 self.emit(device, command, "Not Found")
                 return StatusCodes.NOT_FOUND
-            self._broadlink.send_data(code.encode("utf8"))
 
-            self.emit(device, command, "Sent")
-            return StatusCodes.OK
-        except Exception as err:  # pylint: disable=broad-exception-caught
-            _LOG.error(
-                "[%s] Error sending command %s: %s",
-                self.log_id,
-                command,
-                err,
-            )
-            raise Exception(err) from err
+            try:
+                self._broadlink.send_data(code.encode("utf8"))
+
+                self.emit(device, command, "Sent")
+                return StatusCodes.OK
+            except Exception as err:  # pylint: disable=broad-exception-caught
+                _LOG.error(
+                    "[%s] Error sending command %s: %s",
+                    self.log_id,
+                    command,
+                    err,
+                )
+                raise Exception(err) from err
+        elif code:
+            try:
+                decoded_code = b64encode(code.encode("utf8"))
+                self._broadlink.send_data(decoded_code)
+                return StatusCodes.OK
+            except Exception as err:  # pylint: disable=broad-exception-caught
+                _LOG.error(
+                    "[%s] Error sending custom command: %s",
+                    self.log_id,
+                    err,
+                )
+                raise Exception(err) from err
 
     def convert_ir_code(self, code: str, code_type: str = "auto") -> str:
         """
@@ -229,7 +236,7 @@ class Broadlink:
             raise ValueError("IR code cannot be empty")
 
         # Auto-detect code type if not specified
-        if code_type == "auto":
+        if code_type == "auto" or code_type is None:
             if code.startswith("0000 ") or " " in code:
                 code_type = "pronto"
             else:
