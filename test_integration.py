@@ -10,11 +10,13 @@ import sys
 import unittest
 import base64
 from pathlib import Path
-from unittest.mock import Mock, MagicMock
+from unittest.mock import Mock
 
 # Add the intg-broadlink directory to the Python path
 sys.path.insert(0, str(Path(__file__).parent / "intg-broadlink"))
 
+# Import IR converter functions after path modification
+# flake8: noqa: E402
 from ir_converter import (
     hex_to_broadlink,
     pronto_to_broadlink,
@@ -25,14 +27,14 @@ from ir_converter import (
 
 class MockBroadlinkDevice:
     """Mock Broadlink device for testing."""
-    
+
     def __init__(self):
         self.identifier = "test_device"
 
 
 class MockBroadlinkConfig:
     """Mock Broadlink configuration for testing."""
-    
+
     def __init__(self):
         self.devices = Mock()
 
@@ -44,10 +46,11 @@ class TestBroadlinkIntegration(unittest.TestCase):
         """Set up test fixtures."""
         self.mock_device = MockBroadlinkDevice()
         self.mock_config = MockBroadlinkConfig()
-        
+
         # Import and create Broadlink instance with mocks
         try:
             from rm import Broadlink
+
             self.broadlink = Broadlink(self.mock_device, self.mock_config)
             self.broadlink_available = True
         except ImportError:
@@ -58,13 +61,13 @@ class TestBroadlinkIntegration(unittest.TestCase):
         """Test auto-detection of HEX format."""
         if not self.broadlink_available:
             self.skipTest("Broadlink class not available")
-        
+
         hex_code = "26001A00AC005D00"
         result = self.broadlink.convert_ir_code(hex_code, "auto")
-        
+
         # Should return base64 encoded data
         self.assertIsInstance(result, (str, bytes))
-        
+
         # Should be valid base64
         if isinstance(result, str):
             try:
@@ -79,10 +82,10 @@ class TestBroadlinkIntegration(unittest.TestCase):
         """Test auto-detection of PRONTO format."""
         if not self.broadlink_available:
             self.skipTest("Broadlink class not available")
-        
+
         pronto_code = "0000 006C 0004 0000 015B 00AD 0016 0041"
         result = self.broadlink.convert_ir_code(pronto_code, "auto")
-        
+
         # Should return some form of encoded data
         self.assertIsInstance(result, (str, bytes))
         self.assertTrue(len(result) > 0)
@@ -91,10 +94,10 @@ class TestBroadlinkIntegration(unittest.TestCase):
         """Test explicit HEX format specification."""
         if not self.broadlink_available:
             self.skipTest("Broadlink class not available")
-        
+
         hex_code = "26001A00"
         result = self.broadlink.convert_ir_code(hex_code, "hex")
-        
+
         self.assertIsInstance(result, (str, bytes))
         self.assertTrue(len(result) > 0)
 
@@ -102,10 +105,10 @@ class TestBroadlinkIntegration(unittest.TestCase):
         """Test explicit PRONTO format specification."""
         if not self.broadlink_available:
             self.skipTest("Broadlink class not available")
-        
+
         pronto_code = "0000 006C 0004 0000 015B 00AD 0016 0041"
         result = self.broadlink.convert_ir_code(pronto_code, "pronto")
-        
+
         self.assertIsInstance(result, (str, bytes))
         self.assertTrue(len(result) > 0)
 
@@ -113,10 +116,12 @@ class TestBroadlinkIntegration(unittest.TestCase):
         """Test custom NEC format conversion."""
         if not self.broadlink_available:
             self.skipTest("Broadlink class not available")
-        
+
         nec_code = "3;0x1FE50AF;32;0"
-        result = self.broadlink.convert_ir_code(nec_code, "hex")  # Custom format is handled under hex
-        
+        result = self.broadlink.convert_ir_code(
+            nec_code, "hex"
+        )  # Custom format is handled under hex
+
         self.assertIsInstance(result, (str, bytes))
         self.assertTrue(len(result) > 0)
 
@@ -124,7 +129,7 @@ class TestBroadlinkIntegration(unittest.TestCase):
         """Test that empty input raises ValueError."""
         if not self.broadlink_available:
             self.skipTest("Broadlink class not available")
-        
+
         with self.assertRaises(ValueError):
             self.broadlink.convert_ir_code("", "auto")
 
@@ -132,7 +137,7 @@ class TestBroadlinkIntegration(unittest.TestCase):
         """Test that invalid format raises ValueError."""
         if not self.broadlink_available:
             self.skipTest("Broadlink class not available")
-        
+
         with self.assertRaises(ValueError):
             self.broadlink.convert_ir_code("valid_code", "invalid_format")
 
@@ -145,13 +150,13 @@ class TestDirectFunctionIntegration(unittest.TestCase):
         # Start with a HEX code
         hex_code = "26001A00AC005D00"
         hex_result = hex_to_broadlink(hex_code)
-        
+
         # Verify it's valid
         self.assertTrue(validate_broadlink_packet(hex_result))
-        
+
         # Convert to base64 for storage/transmission
         b64_code = base64.b64encode(hex_result).decode()
-        
+
         # Convert back and verify it's the same
         decoded_result = base64.b64decode(b64_code)
         self.assertEqual(hex_result, decoded_result)
@@ -160,17 +165,17 @@ class TestDirectFunctionIntegration(unittest.TestCase):
         """Test that the same IR signal can be converted from different formats."""
         # This test would ideally compare HEX and PRONTO versions of the same IR signal
         # For now, we just test that both produce valid packets
-        
+
         hex_code = "26001A00"
         pronto_code = "0000 006C 0002 0000 015B 00AD"
-        
+
         hex_result = hex_to_broadlink(hex_code)
         pronto_result = pronto_to_broadlink(pronto_code)
-        
+
         # Both should be valid packets
         self.assertTrue(validate_broadlink_packet(hex_result))
         self.assertTrue(validate_broadlink_packet(pronto_result))
-        
+
         # Both should have the same command type
         self.assertEqual(hex_result[0], pronto_result[0])
 
@@ -180,14 +185,14 @@ class TestDirectFunctionIntegration(unittest.TestCase):
         valid_nec = "3;0x1FE50AF;32;0"
         result = custom_to_broadlink(valid_nec)
         self.assertTrue(validate_broadlink_packet(result))
-        
+
         # Test different valid NEC codes
         test_codes = [
             "3;0xFF00FF;32;0",
             "3;0x807F807F;32;0",
             "3;0x1234ABCD;32;0",
         ]
-        
+
         for code in test_codes:
             with self.subTest(nec_code=code):
                 try:
@@ -207,7 +212,7 @@ class TestDirectFunctionIntegration(unittest.TestCase):
             ("custom", "3;0x1FE50AF;32;0"),
             ("custom", "3;0xFF00FF;32;0"),
         ]
-        
+
         results = []
         for code_type, code in test_codes:
             try:
@@ -217,13 +222,13 @@ class TestDirectFunctionIntegration(unittest.TestCase):
                     result = pronto_to_broadlink(code)
                 elif code_type == "custom":
                     result = custom_to_broadlink(code)
-                
+
                 results.append(result)
                 self.assertTrue(validate_broadlink_packet(result))
             except ValueError:
                 # Some test codes may not be valid, which is fine for this test
                 pass
-        
+
         # Should have at least some successful conversions
         self.assertGreater(len(results), 0)
 
@@ -234,23 +239,23 @@ class TestDirectFunctionIntegration(unittest.TestCase):
             ("hex", "26001A00"),
             ("pronto", "0000 006C 0002 0000 015B 00AD"),
         ]
-        
+
         for input_type, code in test_inputs:
             with self.subTest(input_type=input_type):
                 if input_type == "hex":
                     result = hex_to_broadlink(code)
                 elif input_type == "pronto":
                     result = pronto_to_broadlink(code)
-                
+
                 # Check packet structure consistency
                 self.assertEqual(result[0], 0x26)  # Command type
                 self.assertEqual(result[1], 0x00)  # Command repeat
-                
+
                 # Check length is multiple of 16
                 self.assertEqual(len(result) % 16, 0)
-                
+
                 # Check that payload length field makes sense
-                payload_length = int.from_bytes(result[2:4], byteorder='little')
+                payload_length = int.from_bytes(result[2:4], byteorder="little")
                 expected_total = 4 + payload_length
                 if expected_total % 16 != 0:
                     expected_total += 16 - (expected_total % 16)
@@ -261,10 +266,10 @@ def run_integration_tests():
     """Run all integration tests and display results."""
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromModule(sys.modules[__name__])
-    
+
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
-    
+
     return result.wasSuccessful()
 
 
