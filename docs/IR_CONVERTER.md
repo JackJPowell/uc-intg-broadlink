@@ -53,30 +53,6 @@ Where:
 
 ## Usage
 
-### Command Line Tool
-
-A convenient CLI tool is provided for converting between IR formats:
-
-```bash
-# Convert NEC hex to Broadlink format (auto-detect)
-python tools/ir_code_converter.py "0x1FE50AF"
-
-# Convert NEC address/command pair to Broadlink format
-python tools/ir_code_converter.py "FE AF"
-
-# Convert custom format to Broadlink format
-python tools/ir_code_converter.py "3;0x1FE50AF;32;0"
-
-# Convert PRONTO to Broadlink format
-python tools/ir_code_converter.py "0000 006C 0043 0000 ..."
-
-# Show detailed analysis
-python tools/ir_code_converter.py "0x1FE50AF" --analyze
-
-# Specify input format explicitly
-python tools/ir_code_converter.py "1FE50AF" --input-format nec
-```
-
 ### Direct Conversion
 
 ```python
@@ -183,6 +159,16 @@ Converts a PRONTO IR code string to Broadlink format.
 
 **Raises:** `ValueError` for invalid input
 
+### `nec_to_broadlink(nec_code: str) -> bytes`
+Converts a NEC IR code string to Broadlink format.
+
+**Parameters:**
+- `nec_code`: NEC format string (raw hex, address/command pair)
+
+**Returns:** Raw Broadlink IR data as bytes
+
+**Raises:** `ValueError` for invalid input
+
 ### `custom_to_pronto(custom_code: str) -> str`
 Converts a custom semicolon-separated IR code to PRONTO format.
 
@@ -226,16 +212,6 @@ print(pronto_code)
 # Output: 0000 006C 0043 0000 0156 00AB 0015 0040 0015 0040 ...
 ```
 
-### Using the CLI Tool
-
-```bash
-# Convert to PRONTO format with analysis
-python tools/ir_code_converter.py "3;0x1FE50AF;32;0" --analyze
-
-# Convert to Broadlink format
-python tools/ir_code_converter.py "3;0x1FE50AF;32;0" --output-format broadlink
-```
-
 ### NEC Protocol Analysis
 
 The custom format `3;0x1FE50AF;32;0` represents:
@@ -244,19 +220,11 @@ The custom format `3;0x1FE50AF;32;0` represents:
 - Command: 0xAF, Inverted Command: 0x50
 - Valid NEC format (address + ~address = 255, command + ~command = 255)
 
-See `tools/ir_code_converter.py` for complete usage examples.
-
 ## Testing
 
 Run the test suite:
 ```bash
-python test_ir_converter.py
-python test_integration.py
-```
-
-Test the CLI tool:
-```bash
-python tools/ir_code_converter.py "3;0x1FE50AF;32;0" --analyze
+python test_custom_converter.py
 ```
 
 ## Integration Notes
@@ -264,4 +232,4 @@ python tools/ir_code_converter.py "3;0x1FE50AF;32;0" --analyze
 - The IR converter is designed to integrate seamlessly with existing Broadlink functionality
 - Converted codes can be used directly with `device.send_data()`
 - Base64 encoding is handled automatically when using the Broadlink class integration
-- Auto-detection between HEX and PRONTO formats is supported
+- Auto-detection between HEX, PRONTO, NEC, and custom formats is supported
