@@ -17,7 +17,7 @@ from broadlink.exceptions import BroadlinkException, ReadError, StorageError
 from config import BroadlinkDevice
 from pyee.asyncio import AsyncIOEventEmitter
 from ucapi import StatusCodes
-from ir_converter import hex_to_broadlink, pronto_to_broadlink, custom_to_pronto
+from ir_converter import hex_to_broadlink, pronto_to_broadlink, custom_to_pronto, nec_to_broadlink
 
 _LOG = logging.getLogger(__name__)
 
@@ -216,11 +216,11 @@ class Broadlink:
 
     def convert_ir_code(self, code: str, code_type: str = "auto") -> str:
         """
-        Convert HEX, PRONTO, or custom IR codes to Broadlink format.
+        Convert HEX, PRONTO, NEC, or custom IR codes to Broadlink format.
 
         Args:
-            code: IR code string (HEX, PRONTO, or custom format)
-            code_type: Type of code ("hex", "pronto", "custom", or "auto" for auto-detection)
+            code: IR code string (HEX, PRONTO, NEC, or custom format)
+            code_type: Type of code ("hex", "pronto", "nec", "custom", or "auto" for auto-detection)
 
         Returns:
             str: Base64 encoded Broadlink IR code
@@ -228,7 +228,8 @@ class Broadlink:
         Raises:
             ValueError: If code format is invalid or conversion functions not available
         """
-        if hex_to_broadlink is None or pronto_to_broadlink is None or custom_to_pronto is None:
+        if (hex_to_broadlink is None or pronto_to_broadlink is None or 
+            custom_to_pronto is None or nec_to_broadlink is None):
             raise ValueError("IR converter functions not available")
 
         code = code.strip()
@@ -237,10 +238,12 @@ class Broadlink:
 
         # Auto-detect code type if not specified
         if code_type == "auto" or code_type is None:
-            if code.startswith("0000 ") or " " in code:
+            if code.startswith("0000 ") or " " in code and not self._is_nec_format(code):
                 code_type = "pronto"
             elif ";" in code and code.count(";") == 3:
                 code_type = "custom"
+            elif self._is_nec_format(code):
+                code_type = "nec"
             else:
                 code_type = "hex"
 
@@ -249,6 +252,8 @@ class Broadlink:
                 broadlink_data = hex_to_broadlink(code)
             elif code_type.lower() == "pronto":
                 broadlink_data = pronto_to_broadlink(code)
+            elif code_type.lower() == "nec":
+                broadlink_data = nec_to_broadlink(code)
             elif code_type.lower() == "custom":
                 # First convert custom to PRONTO, then PRONTO to Broadlink
                 pronto_code = custom_to_pronto(code)
@@ -261,6 +266,49 @@ class Broadlink:
         except Exception as e:
             _LOG.error("[%s] Error converting IR code: %s", self.log_id, e)
             raise ValueError(f"Failed to convert IR code: {e}") from e
+    
+    def _is_nec_format(self, code: str) -> bool:
+        """
+        Detect if code is in NEC format.
+        
+        Args:
+            code: IR code string to check
+            
+        Returns:
+            bool: True if code appears to be NEC format
+        """
+        code = code.strip()
+        
+        # Check for address/command pair format: "FE AF" or "0xFE 0xAF"
+        if ' ' in code:
+            parts = code.split()
+            if len(parts) == 2:
+                try:
+                    # Try to parse both parts as hex
+                    for part in parts:
+                        if part.startswith('0x') or part.startswith('0X'):
+                            int(part, 16)
+                        else:
+                            int(part, 16)
+                    return True
+                except ValueError:
+                    return False
+        
+        # Check for raw hex format (typically 6-8 hex chars for NEC)
+        if code.startswith('0x') or code.startswith('0X'):
+            hex_part = code[2:]
+        else:
+            hex_part = code
+            
+        # Check if it's valid hex and reasonable length for NEC (4-8 chars typically)
+        if len(hex_part) >= 4 and len(hex_part) <= 8:
+            try:
+                int(hex_part, 16)
+                return True
+            except ValueError:
+                return False
+                
+        return False
             
     def convert_to_pronto(self, code: str, code_type: str = "auto") -> str:
         """

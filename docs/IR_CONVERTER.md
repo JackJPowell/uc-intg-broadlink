@@ -1,10 +1,10 @@
 # IR Code Converter
 
-This module provides functions to convert HEX, PRONTO, and custom IR codes into the Broadlink IR raw format, and also supports converting custom format codes to PRONTO format.
+This module provides functions to convert HEX, PRONTO, NEC, and custom IR codes into the Broadlink IR raw format, with support for converting between different IR formats.
 
 ## Overview
 
-The IR converter allows you to convert infrared remote control codes from common formats (HEX, PRONTO, and custom semicolon-separated format) into the Broadlink device format or PRONTO format. This is useful when you have IR codes from other sources and want to use them with Broadlink devices or other systems.
+The IR converter allows you to convert infrared remote control codes from common formats (HEX, PRONTO, NEC, and custom semicolon-separated format) into the Broadlink device format. This is useful when you have IR codes from other sources and want to use them with Broadlink devices.
 
 ## Supported Formats
 
@@ -18,6 +18,23 @@ Raw hexadecimal IR pulse data. Example:
 Philips Pronto remote control format. Example:
 ```
 0000 006C 0022 0002 015B 00AD 0016 0041 0016 0041 0016 0041 0016 0016 0016 0016 0016 0016 0016 0016 0016 0041 0016 0041 0016 0041 0016 0016 0016 0016 0016 0016 0016 0016 0016 0041 0016 0016 0016 0041 0016 0016 0016 0016 0016 0016 0016 0016 0016 0016 0016 0016 0016 0041 0016 0016 0016 0041 0016 0041 0016 0041 0016 0041 0016 0041 0016 0041 0016 06A4 015B 0057 0016 0E6C
+```
+
+### NEC Format
+NEC protocol IR codes in various representations:
+
+#### Raw Hex Format
+32-bit hex values representing NEC protocol. Examples:
+```
+0x1FE50AF    # With 0x prefix
+1FE50AF      # Without prefix
+```
+
+#### Address/Command Pair Format
+Separate address and command values. Examples:
+```
+FE AF        # Without 0x prefix
+0xFE 0xAF    # With 0x prefix
 ```
 
 ### Custom Format
@@ -38,23 +55,37 @@ Where:
 
 ### Command Line Tool
 
-A convenient CLI tool is provided for converting custom format codes:
+A convenient CLI tool is provided for converting between IR formats:
 
 ```bash
-# Convert to PRONTO format
+# Convert NEC hex to Broadlink format (auto-detect)
+python tools/ir_code_converter.py "0x1FE50AF"
+
+# Convert NEC address/command pair to Broadlink format
+python tools/ir_code_converter.py "FE AF"
+
+# Convert custom format to Broadlink format
 python tools/ir_code_converter.py "3;0x1FE50AF;32;0"
 
-# Convert to Broadlink format
-python tools/ir_code_converter.py "3;0x1FE50AF;32;0" --output-format broadlink
+# Convert PRONTO to Broadlink format
+python tools/ir_code_converter.py "0000 006C 0043 0000 ..."
 
 # Show detailed analysis
-python tools/ir_code_converter.py "3;0x1FE50AF;32;0" --analyze
+python tools/ir_code_converter.py "0x1FE50AF" --analyze
+
+# Specify input format explicitly
+python tools/ir_code_converter.py "1FE50AF" --input-format nec
 ```
 
 ### Direct Conversion
 
 ```python
-from intg_broadlink.ir_converter import hex_to_broadlink, pronto_to_broadlink, custom_to_pronto
+from intg_broadlink.ir_converter import (
+    hex_to_broadlink, 
+    pronto_to_broadlink, 
+    nec_to_broadlink, 
+    custom_to_pronto
+)
 import base64
 
 # Convert HEX code
@@ -65,6 +96,16 @@ b64_code = base64.b64encode(broadlink_data).decode()
 # Convert PRONTO code
 pronto_code = "0000 006C 0022 0002 015B 00AD ..."
 broadlink_data = pronto_to_broadlink(pronto_code)
+b64_code = base64.b64encode(broadlink_data).decode()
+
+# Convert NEC hex format
+nec_code = "0x1FE50AF"
+broadlink_data = nec_to_broadlink(nec_code)
+b64_code = base64.b64encode(broadlink_data).decode()
+
+# Convert NEC address/command pair
+nec_code = "FE AF"
+broadlink_data = nec_to_broadlink(nec_code)
 b64_code = base64.b64encode(broadlink_data).decode()
 
 # Convert custom format to PRONTO
@@ -91,9 +132,15 @@ b64_code = broadlink.convert_ir_code(your_ir_code)
 # Convert specific formats
 b64_code = broadlink.convert_ir_code(hex_code, "hex")
 b64_code = broadlink.convert_ir_code(pronto_code, "pronto")
+b64_code = broadlink.convert_ir_code(nec_code, "nec")
 b64_code = broadlink.convert_ir_code(custom_code, "custom")
 
-# Convert custom format to PRONTO
+# Examples with different NEC formats
+b64_code = broadlink.convert_ir_code("0x1FE50AF", "nec")      # Raw hex
+b64_code = broadlink.convert_ir_code("FE AF", "nec")          # Address/Command
+b64_code = broadlink.convert_ir_code("3;0x1FE50AF;32;0", "custom")  # Custom format
+
+# Convert custom format to PRONTO (backward compatibility)
 pronto_code = broadlink.convert_to_pronto(custom_code, "custom")
 ```
 

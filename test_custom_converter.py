@@ -9,7 +9,7 @@ from pathlib import Path
 # Add the intg-broadlink directory to the path
 sys.path.insert(0, str(Path(__file__).parent / "intg-broadlink"))
 
-from ir_converter import custom_to_pronto, pronto_to_broadlink
+from ir_converter import custom_to_pronto, pronto_to_broadlink, nec_to_broadlink
 import base64
 
 def test_custom_to_pronto():
@@ -61,6 +61,33 @@ def test_round_trip():
     except Exception as e:
         print(f"✗ Round-trip failed: {e}")
         return False
+
+def test_nec_direct_conversion():
+    """Test direct NEC format conversion."""
+    print("\nTesting direct NEC format conversion...")
+    
+    test_cases = [
+        ("0x1FE50AF", "Raw hex with 0x prefix"),
+        ("1FE50AF", "Raw hex without prefix"),
+        ("FE AF", "Address/Command pair"),
+        ("0xFE 0xAF", "Address/Command pair with 0x"),
+    ]
+    
+    passed = 0
+    for nec_code, description in test_cases:
+        try:
+            broadlink_data = nec_to_broadlink(nec_code)
+            b64_code = base64.b64encode(broadlink_data).decode()
+            
+            print(f"✓ {description}: {nec_code} -> {len(broadlink_data)} bytes")
+            passed += 1
+            
+        except Exception as e:
+            print(f"✗ {description}: Failed - {e}")
+    
+    print(f"NEC conversion: {passed}/{len(test_cases)} tests passed")
+    return passed == len(test_cases)
+
 
 def test_nec_validation():
     """Test NEC protocol validation."""
@@ -127,6 +154,7 @@ def main():
     tests = [
         test_custom_to_pronto,
         test_round_trip,
+        test_nec_direct_conversion,
         test_nec_validation,
         test_error_handling,
     ]

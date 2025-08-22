@@ -167,6 +167,60 @@ def _create_broadlink_packet(pulse_data: bytes) -> bytes:
     return bytes(packet)
 
 
+def nec_to_broadlink(nec_code: str) -> bytes:
+    """
+    Convert NEC IR code to Broadlink IR raw format.
+    
+    Supports various NEC formats:
+    - Raw hex: "0x1FE50AF" or "1FE50AF" 
+    - Address/Command pairs: "FE AF" or "0xFE 0xAF"
+    - 32-bit hex values representing NEC protocol
+    
+    Args:
+        nec_code: NEC format IR code
+        
+    Returns:
+        bytes: Broadlink IR raw format data
+        
+    Raises:
+        ValueError: If nec_code is invalid
+    """
+    if not nec_code:
+        raise ValueError("NEC code cannot be empty")
+        
+    nec_code = nec_code.strip()
+    
+    # Parse different NEC formats
+    try:
+        if ' ' in nec_code:
+            # Address/Command pair format: "FE AF" or "0xFE 0xAF"
+            parts = nec_code.split()
+            if len(parts) == 2:
+                addr = int(parts[0], 16) if parts[0].startswith('0x') else int(parts[0], 16)
+                cmd = int(parts[1], 16) if parts[1].startswith('0x') else int(parts[1], 16)
+                # Build NEC 32-bit value: address + ~address + command + ~command
+                nec_value = addr | ((~addr & 0xFF) << 8) | ((cmd & 0xFF) << 16) | ((~cmd & 0xFF) << 24)
+            else:
+                raise ValueError("Address/Command format must have exactly 2 parts")
+        else:
+            # Raw hex format: "0x1FE50AF" or "1FE50AF"
+            if nec_code.startswith('0x') or nec_code.startswith('0X'):
+                nec_value = int(nec_code, 16)
+            else:
+                nec_value = int(nec_code, 16)
+                
+    except ValueError as e:
+        raise ValueError(f"Invalid NEC code format: {e}") from e
+    
+    # Validate it's a 32-bit value
+    if nec_value > 0xFFFFFFFF:
+        raise ValueError("NEC value too large (must be 32-bit)")
+        
+    # Convert NEC to PRONTO, then PRONTO to Broadlink
+    pronto_code = _nec_to_pronto(nec_value, 32, 0)
+    return pronto_to_broadlink(pronto_code)
+
+
 def custom_to_pronto(custom_code: str) -> str:
     """
     Convert custom semicolon-separated IR code to PRONTO format.
