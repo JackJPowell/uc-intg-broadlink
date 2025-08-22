@@ -9,24 +9,38 @@
 This integration is based on the [broadlink](https://github.com/mjg59/python-broadlink) library and uses the
 [uc-integration-api](https://github.com/aitatoi/integration-python-library) to communicate with the Remote Two/3.
 
-A [Remote](https://github.com/unfoldedcircle/core-api/blob/main/doc/entities/entity_remote.md) and [Media Player](https://github.com/unfoldedcircle/core-api/blob/main/doc/entities/entity_media_player.md) are created by this integration.
+A [Remote](https://github.com/unfoldedcircle/core-api/blob/main/doc/entities/entity_remote.md) is created that allows you to learn and send commands learned by your broadlink device.
+
+A [Media Player](https://github.com/unfoldedcircle/core-api/blob/main/doc/entities/entity_media_player.md) is created that allows you to easily reference and send commands learned through your broadlink device.
+
+An [IR Emitter](https://github.com/unfoldedcircle/core-api/blob/main/doc/entities/entity_ir_emitter.md) is created that allows you to send commands learned through the standard Unfolded Circle IR creation process. This will also work for any predefined codesets provided by UC. 
 
 Supported devices:
-- Broadlink devices such as the RM4
+- Broadlink devices such as the RM4 Pro
 
 Supported attributes:
 - State (on, off, unknown)
 
 Supported commands:
 - Send Command
+- Send IR
 
+## Getting Started
 
-## How to Use
+There are two ways to get started with this integration:
+
+1. Use an Unfolded Circle Dock to define a custom code set and learn your IR commands. This will create IR entities that you can reference in your activities. This is the preferred way to get started. <insert picture>
+2. Use your broadlink to learn commands and leverage sources in the included media player to send those commands. (This is the only way to learn RF commands)
+
+If you go with `option 1`, you will follow the standard IR learning process for the Unfolded Circle Dock. During this process, select your broadlink device as the Infrared output device. Continue by including IR entity in your activity and finish by mapping it to your buttons. 
+
+If you go with `option 2`, please continue reading.
+
+## How to Use the custom learning and sending commands
 
 There are three main modes when interacting with the integration: Learning, Deleting and Sending commmands. Start by including the remote and media player in an activity. Then place a media player in the bottom third of the screen. It should be at least 3 rows tall. All commands referenced below are case insensitive. I've made everything uppercase for clarity, but it's not required. This means that you can't have devices or commands that are only differentiated by case.
 
 <img height="250" alt="CleanShot 2025-08-18 at 15 30 25" src="https://github.com/user-attachments/assets/b05448e9-bb38-49a4-a6dd-e25997e37361" />
-
 
 ### Learning
 
@@ -39,8 +53,6 @@ Let's start by learning a new command.
 3. Once learned, the included media player entity will update its `source list` with your new command.
 
 https://github.com/user-attachments/assets/aa6e8d70-9d75-4ca8-8861-e6242c4c4fb9
-
-
 
 ### Sending
 

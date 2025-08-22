@@ -15,6 +15,136 @@ BROADLINK_TICK = 32.84  # microseconds per tick
 IR_COMMAND_TYPE = 0x26  # Command type for IR
 
 
+def custom_to_broadlink(custom_code: str) -> str:
+    """
+    Convert custom semicolon-separated IR code to Broadlink format.
+
+    Supports format: protocol;hex_value;bits;repeat
+    Currently supports NEC protocol (protocol=3).
+
+    Args:
+        custom_code: Custom format IR code (e.g., "3;0x1FE50AF;32;0")
+
+    Returns:
+        str: Broadlink format IR code
+
+    Raises:
+        ValueError: If custom_code is invalid or unsupported protocol
+    """
+    if not custom_code:
+        raise ValueError("Custom code cannot be empty")
+
+    try:
+        parts = custom_code.split(";")
+        if len(parts) != 4:
+            raise ValueError(
+                "Custom code must have format: protocol;hex_value;bits;repeat"
+            )
+
+        protocol = int(parts[0])
+        hex_value = (
+            int(parts[1], 16) if parts[1].startswith("0x") else int(parts[1], 16)
+        )
+        bits = int(parts[2])
+        repeat = int(parts[3])
+
+    except (ValueError, IndexError) as e:
+        raise ValueError(f"Invalid custom code format: {e}") from e
+
+    if protocol == 3:  # NEC protocol
+        return _nec_to_broadlink(hex_value, bits, repeat)
+    else:
+        raise ValueError(f"Unsupported protocol: {protocol}")
+
+
+def _nec_to_broadlink(nec_value: int, bits: int = 32, repeat: int = 0) -> str:
+    """
+    Convert NEC protocol value to Broadlink format.
+    Converts a 32-bit NEC protocol value into PRONTO format for Broadlink IR devices.
+    Args:
+        nec_value: NEC protocol 32-bit value
+        bits: Number of bits (should be 32 for standard NEC)
+        repeat: Repeat count (not used in current implementation)
+
+    Returns:
+        str: PRONTO format IR code
+    """
+    if bits != 32:
+        raise ValueError("NEC protocol requires 32 bits")
+
+    # Validate NEC format (address + ~address + command + ~command)
+    command = nec_value & 0xFF
+    command_inv = (nec_value >> 8) & 0xFF
+    address = (nec_value >> 16) & 0xFF
+    address_inv = (nec_value >> 24) & 0xFF
+
+    # Check if it's valid NEC (inverse bytes should sum to 255)
+    if (address + address_inv) != 255 or (command + command_inv) != 255:
+        _LOG.warning(
+            "NEC validation failed: addr=0x%02X+0x%02X=%d, cmd=0x%02X+0x%02X=%d",
+            address,
+            address_inv,
+            address + address_inv,
+            command,
+            command_inv,
+            command + command_inv,
+        )
+
+    # PRONTO frequency code for 38kHz
+    freq_code = 0x006C
+
+    # NEC timing in PRONTO units (26.3 μs per unit)
+    time_base = 26.3  # microseconds per PRONTO unit
+
+    def us_to_pronto(microseconds):
+        return int(round(microseconds / time_base))
+
+    # NEC protocol timings
+    leading_on = us_to_pronto(9000)  # 9ms leading pulse
+    leading_off = us_to_pronto(4500)  # 4.5ms leading space
+    bit_on = us_to_pronto(562)  # 0.562ms bit pulse
+    bit0_off = us_to_pronto(562)  # 0.562ms for '0' bit
+    bit1_off = us_to_pronto(1687)  # 1.687ms for '1' bit
+    stop_on = us_to_pronto(562)  # 0.562ms stop pulse
+
+    # Build pulse sequence
+    pulses = []
+
+    # Leading burst
+    pulses.extend([leading_on, leading_off])
+
+    # Data bits (LSB first for NEC)
+    for i in range(32):
+        bit = (nec_value >> i) & 1
+        pulses.append(bit_on)
+        if bit:
+            pulses.append(bit1_off)  # '1' bit
+        else:
+            pulses.append(bit0_off)  # '0' bit
+
+    # Stop bit
+    pulses.append(stop_on)
+
+    # Build PRONTO code
+    seq1_length = len(pulses)
+    seq2_length = 0
+
+    # Format as PRONTO hex string
+    pronto_parts = [
+        "0000",  # Raw/learned code format
+        f"{freq_code:04X}",  # Frequency code
+        f"{seq1_length:04X}",  # Sequence 1 length
+        f"{seq2_length:04X}",  # Sequence 2 length
+    ]
+
+    # Add pulse data
+    for pulse in pulses:
+        pronto_parts.append(f"{pulse:04X}")
+
+    pronto = " ".join(pronto_parts)
+    return pronto_to_broadlink(pronto)
+
+
 def hex_to_broadlink(hex_code: str) -> bytes:
     """
     Convert HEX IR code to Broadlink IR raw format.

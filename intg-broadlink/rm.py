@@ -6,7 +6,7 @@ This module implements the broadlink communication of the Remote Two/3 integrati
 import asyncio
 import logging
 from asyncio import AbstractEventLoop
-from base64 import b64encode
+from base64 import b64decode, b64encode
 from datetime import UTC, datetime, timedelta
 from enum import IntEnum, StrEnum
 from typing import ParamSpec, TypeVar
@@ -17,7 +17,8 @@ from broadlink.exceptions import BroadlinkException, ReadError, StorageError
 from config import BroadlinkDevice
 from pyee.asyncio import AsyncIOEventEmitter
 from ucapi import StatusCodes
-from ir_converter import hex_to_broadlink, pronto_to_broadlink
+from ir_converter import custom_to_broadlink, hex_to_broadlink, pronto_to_broadlink
+
 
 _LOG = logging.getLogger(__name__)
 
@@ -189,7 +190,7 @@ class Broadlink:
                 return StatusCodes.NOT_FOUND
 
             try:
-                self._broadlink.send_data(code.encode("utf8"))
+                self._broadlink.send_data(b64decode(code))
 
                 self.emit(device, command, "Sent")
                 return StatusCodes.OK
@@ -203,8 +204,7 @@ class Broadlink:
                 raise Exception(err) from err
         elif code:
             try:
-                decoded_code = b64encode(code.encode("utf8"))
-                self._broadlink.send_data(decoded_code)
+                self._broadlink.send_data(self._broadlink.encrypt(code))
                 return StatusCodes.OK
             except Exception as err:  # pylint: disable=broad-exception-caught
                 _LOG.error(
@@ -228,9 +228,6 @@ class Broadlink:
         Raises:
             ValueError: If code format is invalid or conversion functions not available
         """
-        if hex_to_broadlink is None or pronto_to_broadlink is None:
-            raise ValueError("IR converter functions not available")
-
         code = code.strip()
         if not code:
             raise ValueError("IR code cannot be empty")
@@ -244,13 +241,16 @@ class Broadlink:
 
         try:
             if code_type.lower() == "hex":
-                broadlink_data = hex_to_broadlink(code)
+                if ";" in code:
+                    broadlink_data = custom_to_broadlink(code)
+                else:
+                    broadlink_data = hex_to_broadlink(code)
             elif code_type.lower() == "pronto":
                 broadlink_data = pronto_to_broadlink(code)
             else:
                 raise ValueError(f"Unsupported code type: {code_type}")
 
-            return b64encode(broadlink_data).decode("utf8")
+            return broadlink_data
 
         except Exception as e:
             _LOG.error("[%s] Error converting IR code: %s", self.log_id, e)
