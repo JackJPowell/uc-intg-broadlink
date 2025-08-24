@@ -1,8 +1,7 @@
 # Triggered by version tag creation to build a distribution binary, Docker image, and create a release draft
----
 name: "Build & Draft Release"
 
-on:
+"on":
   push:
     tags:
       - 'v*'
