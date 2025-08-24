@@ -13,6 +13,7 @@ from ucapi.media_player import States as MediaStates
 from ucapi.remote import Attributes, Commands
 from ucapi.remote import States as RemoteStates
 import rm
+from ir_converter import convert_to_broadlink
 
 _LOG = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ class BroadlinkIREmitter(Entity):
         self._device: rm.Broadlink = device
         _LOG.debug("Broadlink IR Emitter init")
         entity_id = create_entity_id(config_device.identifier, "ir_emitter")
-        features = ["send_ir", "learn_ir"]
+        features = ["send_ir"]
         super().__init__(
             entity_id,
             f"{config_device.name} IR Emitter",
@@ -106,9 +107,7 @@ class BroadlinkIREmitter(Entity):
             repeat = 1
 
         if cmd_id == "send_ir":
-            code = self._device.convert_ir_code(
-                params.get("code"), params.get("format")
-            )
+            code = convert_to_broadlink(params.get("code"))
             await self._device.send_command(code=code)
             return StatusCodes.OK
 

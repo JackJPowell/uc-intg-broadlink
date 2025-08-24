@@ -17,7 +17,7 @@ from broadlink.exceptions import BroadlinkException, ReadError, StorageError
 from config import BroadlinkDevice
 from pyee.asyncio import AsyncIOEventEmitter
 from ucapi import StatusCodes
-from ir_converter import custom_to_broadlink, hex_to_broadlink, pronto_to_broadlink
+from ir_converter import convert_to_broadlink
 
 
 _LOG = logging.getLogger(__name__)
@@ -190,7 +190,8 @@ class Broadlink:
                 return StatusCodes.NOT_FOUND
 
             try:
-                self._broadlink.send_data(b64decode(code))
+                decode = b64decode(code)
+                self._broadlink.send_data(decode)
 
                 self.emit(device, command, "Sent")
                 return StatusCodes.OK
@@ -204,7 +205,7 @@ class Broadlink:
                 raise Exception(err) from err
         elif code:
             try:
-                self._broadlink.send_data(self._broadlink.encrypt(code))
+                self._broadlink.send_data(code)
                 return StatusCodes.OK
             except Exception as err:  # pylint: disable=broad-exception-caught
                 _LOG.error(
@@ -213,48 +214,6 @@ class Broadlink:
                     err,
                 )
                 raise Exception(err) from err
-
-    def convert_ir_code(self, code: str, code_type: str = "auto") -> str:
-        """
-        Convert HEX or PRONTO IR codes to Broadlink format.
-
-        Args:
-            code: IR code string (HEX or PRONTO format)
-            code_type: Type of code ("hex", "pronto", or "auto" for auto-detection)
-
-        Returns:
-            str: Base64 encoded Broadlink IR code
-
-        Raises:
-            ValueError: If code format is invalid or conversion functions not available
-        """
-        code = code.strip()
-        if not code:
-            raise ValueError("IR code cannot be empty")
-
-        # Auto-detect code type if not specified
-        if code_type == "auto" or code_type is None:
-            if code.startswith("0000 ") or " " in code:
-                code_type = "pronto"
-            else:
-                code_type = "hex"
-
-        try:
-            if code_type.lower() == "hex":
-                if ";" in code:
-                    broadlink_data = custom_to_broadlink(code)
-                else:
-                    broadlink_data = hex_to_broadlink(code)
-            elif code_type.lower() == "pronto":
-                broadlink_data = pronto_to_broadlink(code)
-            else:
-                raise ValueError(f"Unsupported code type: {code_type}")
-
-            return broadlink_data
-
-        except Exception as e:
-            _LOG.error("[%s] Error converting IR code: %s", self.log_id, e)
-            raise ValueError(f"Failed to convert IR code: {e}") from e
 
     async def learn_ir_command(self, input: str) -> None:
         """Learn a command."""

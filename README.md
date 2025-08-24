@@ -36,9 +36,12 @@ If you go with `option 1`, you will follow the standard IR learning process for 
 
 ### Supported formats for Option 1:
 - Pronto
-- NEC `<protocol>;<hex-ir-code>;<bits>;<repeat-count>` E.g. `3;0x1FEF807;32;0` (The leading 3 specifies NEC format) (Displayed as HEX in the Web Configurator)
-- HEX (Currently untested)
+- HEX (NEC Protocol)
+- Global Cache (Untested)
 
+When you use your dock to learn a new IR command, it will be represented in the following format: `<protocol>;<hex-ir-code>;<bits>;<repeat-count>` E.g. `3;0x1FEF807;32;0` Each protocol needs to be translated for your broadlink device and presently only the NEC protocol is supported and is represented by a 3 at the start of the custom command. 
+
+ 
 ## Option 2
 
 ## How to Use the custom learning and sending commands

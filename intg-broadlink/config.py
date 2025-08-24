@@ -149,7 +149,8 @@ class Devices:
         if hasattr(device, "data"):
             if command in device.data.get(device_name, {}):
                 status = "Updated"
-            device.data[device_name] = {}
+            if device_name not in device.data:
+                device.data[device_name] = {}
             device.data[device_name][command] = code
         else:
             device.data.setdefault(device_name, {})[command] = code
