@@ -202,7 +202,7 @@ class Broadlink:
                     command,
                     err,
                 )
-                raise Exception(err) from err
+                return StatusCodes.BAD_REQUEST
         elif code:
             try:
                 self._broadlink.send_data(code)
@@ -213,7 +213,7 @@ class Broadlink:
                     self.log_id,
                     err,
                 )
-                raise Exception(err) from err
+                return StatusCodes.BAD_REQUEST
 
     async def learn_ir_command(self, input: str) -> None:
         """Learn a command."""

@@ -111,6 +111,10 @@ class BroadlinkIREmitter(Entity):
             await self._device.send_command(code=code)
             return StatusCodes.OK
 
+        if cmd_id == "stop_ir":
+            # Ignore stop command as Broadlink does not support it
+            return StatusCodes.OK
+
         if cmd_id == Commands.SEND_CMD_SEQUENCE:
             success = True
             for command in params.get("sequence", []):
