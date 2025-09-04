@@ -3,7 +3,7 @@
   "version": "0.3.0",
   "min_core_api": "0.20.0",
   "name": { "en": "Broadlink" },
-  "icon": "uc:display",
+  "icon": "uc:pulse",
   "description": {
     "en": "Control your Broadlink devices with Remote Two/3.",
     "de": "Steuere deine Broadlink-Geräte mit Remote Two/3.",
