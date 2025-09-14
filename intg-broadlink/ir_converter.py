@@ -2,7 +2,7 @@
 Unified IR code conversion utilities for Broadlink devices.
 
 Supported input formats:
-- PRONTO 0000 (enhanced parsing: intro/repeat frames, hold simulation, trailing silence)
+- PRONTO 0000 (treat all timings as one block, drop last if odd; no repeat expansion)
 - Global Caché 'sendir' strings
 - Custom NEC format: "3;0x<hex>;bits;repeat_count"
 - Raw list[int] pulses in microseconds (already normalized)
@@ -12,31 +12,24 @@ Public main entry point for BroadLink packet creation:
     convert_to_broadlink(code)
 
 Convenience helpers:
-    pronto_to_broadlink(pronto_hex, ...)
+    pronto_to_broadlink(pronto_hex)
     hex_to_broadlink(hex_string)
 """
 
 from __future__ import annotations
 
+import logging
 from typing import List, Union
 import binascii
 import re
 
-from broadlink.remote import pulses_to_data
+_LOG = logging.getLogger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# Global defaults
-# ---------------------------------------------------------------------------
-
-DEFAULT_HOLD_MS = 300  # approximate "tap" hold duration
-DEFAULT_TRAILING_SILENCE_US = 105_000  # ~105 ms end gap
-MAX_REPEAT_EXPANSIONS = 8
-_SMALL_OFF_GAP_US = 560
-
+# BroadLink tick (≈32.84µs)
+BRDLNK_UNIT = 269.0 / 8192.0
 
 # ---------------------------------------------------------------------------
-# Utility: BroadLink raw HEX passthrough
+# Utilities
 # ---------------------------------------------------------------------------
 
 
@@ -50,7 +43,22 @@ def _looks_like_broadlink_hex(s: str) -> bool:
         return False
     if not re.fullmatch(r"[0-9A-Fa-f]+", stripped):
         return False
+    # BroadLink IR payloads typically start with 0x26
     return stripped.lower().startswith("26")
+
+
+def _round_half_up(x: float) -> int:
+    """
+    Round half up for non-negative values.
+    """
+    if x <= 0:
+        return 0
+    return int(x + 0.5)
+
+
+# ---------------------------------------------------------------------------
+# BroadLink raw HEX passthrough
+# ---------------------------------------------------------------------------
 
 
 def hex_to_broadlink(hex_string: str) -> bytes:
@@ -142,15 +150,14 @@ def nec_to_pulses(code_str: str, lsb_first: bool = False) -> List[int]:
 
 
 # ---------------------------------------------------------------------------
-# PRONTO advanced unified path
+# PRONTO (0000) parsing → BroadLink bytes
 # ---------------------------------------------------------------------------
 
 
-def _parse_pronto_words(pronto_hex: str) -> List[int]:
+def _hex_to_words(pronto_hex: str) -> List[int]:
     """
-    Tolerant PRONTO parsing:
-      - Removes all non-hex chars.
-      - Requires total length multiple of 4.
+    PRONTO string -> array of 16-bit words. Tolerates non-hex separators.
+    Requires total hex length to be a positive multiple of 4.
     """
     cleaned = _clean_hex(pronto_hex)
     if len(cleaned) == 0 or len(cleaned) % 4 != 0:
@@ -158,117 +165,98 @@ def _parse_pronto_words(pronto_hex: str) -> List[int]:
     return [int(cleaned[i : i + 4], 16) for i in range(0, len(cleaned), 4)]
 
 
-def _split_pronto(words: List[int]):
+def pronto_to_broadlink(pronto_hex: str) -> bytes:
     """
-    Split into (freq_word, intro_units, repeat_units) in PRONTO timing units.
+    Convert PRONTO 0000 code to BroadLink RM payload (bytes), matching the JavaScript logic:
 
-    Forgiving logic:
-      - Drops a dangling half pair.
-      - If declared total pairs == 0 -> treat entire body as repeat_units.
-      - If not enough timings -> allocate to intro first, remainder to repeat.
-      - If excess timings -> trim.
+      - Only learned format 0000 is supported
+      - Treat all timings after the first 4 words as a single block
+      - If an odd number of timing words is present, drop the last value
+      - Microseconds per unit = freq_word * 0.241246, rounded with half-up
+      - BroadLink ticks = floor(us * 269 / 8192)
+      - Pack as: 0x26 0x00 [len_lo] [len_hi] [payload...] 0x0d 0x05
+      - Pad to a multiple of 16 bytes with zeros
     """
+    words = _hex_to_words(pronto_hex)
+
     if len(words) < 4:
         raise ValueError("PRONTO: too few words")
     if words[0] != 0x0000:
-        raise ValueError("PRONTO: only 0000 format supported")
+        raise ValueError("PRONTO: only learned format 0000 supported")
 
-    freq_word = words[1]
-    one_pairs = words[2]
-    rep_pairs = words[3]
+    freq_word = int(words[1]) & 0xFFFF
 
-    timings = words[4:]
-    if len(timings) % 2 == 1:
-        timings = timings[:-1]
-
-    declared_pairs = one_pairs + rep_pairs
-    available_pairs = len(timings) // 2
-    if available_pairs == 0:
-        raise ValueError("PRONTO: no timing values")
-
-    if declared_pairs == 0:
-        return freq_word, [], timings
-
-    if available_pairs >= declared_pairs:
-        intro_units = timings[: one_pairs * 2]
-        repeat_units = timings[one_pairs * 2 : one_pairs * 2 + rep_pairs * 2]
-    else:
-        intro_units_len = min(one_pairs * 2, len(timings))
-        intro_units = timings[:intro_units_len]
-        repeat_units = timings[intro_units_len:]
-
-    return freq_word, intro_units, repeat_units
-
-
-def pronto_to_pulses(
-    pronto_hex: str,
-    *,
-    hold_ms: int = DEFAULT_HOLD_MS,
-    trailing_silence_us: int = DEFAULT_TRAILING_SILENCE_US,
-    repeat_cap: int = MAX_REPEAT_EXPANSIONS,
-    repeat: bool = True,
-    ensure_even: bool = True,
-    add_trailing_silence: bool = True,
-) -> List[int]:
-    """
-    Convert PRONTO 0000 code to microsecond pulses with:
-      - Intro/repeat frame separation.
-      - Repeat frame expansion to approximate a short press (if repeat units exist and repeat=True).
-      - Even pulse normalization (optional).
-      - Trailing silence appended (optional).
-
-    Parameters:
-        hold_ms: Approximate total active duration target for repeat block(s).
-                 If 0, only one repeat frame is used.
-        trailing_silence_us: Large final OFF gap (ignored if add_trailing_silence=False).
-        repeat: Enable repeat-frame expansion if repeat section exists.
-        repeat_cap: Max expansions (safety).
-        ensure_even: Ensure pulses list length is even (add small OFF if needed).
-        add_trailing_silence: Append trailing silence gap.
-
-    Returns:
-        List[int] microsecond pulses starting with ON.
-    """
-    words = _parse_pronto_words(pronto_hex)
-    freq_word, intro_units, repeat_units = _split_pronto(words)
-    if freq_word <= 0:
-        raise ValueError("PRONTO: invalid frequency word")
+    # Take all timings after the preamble; ignore intro/repeat split/counts
+    timings_units = words[4:]
+    if len(timings_units) % 2 == 1:
+        # If odd, drop last value (must be pairs)
+        timings_units = timings_units[:-1]
 
     unit_us = freq_word * 0.241246
 
-    def units_to_us(seq):
-        return [max(1, int(round(u * unit_us))) for u in seq]
+    # Convert each timing to microseconds (rounded half up, min 1 µs)
+    pulses_us = [max(1, _round_half_up(u * unit_us)) for u in timings_units]
 
-    pulses: List[int] = []
+    # Convert microseconds to BroadLink ticks (floor)
+    ticks = [int((us * BRDLNK_UNIT) // 1) for us in pulses_us]
 
-    if intro_units:
-        pulses.extend(units_to_us(intro_units))
+    # Encode payload bytes
+    payload = bytearray()
+    for t in ticks:
+        if t < 256:
+            payload.append(t & 0xFF)
+        else:
+            payload.extend((0x00, (t >> 8) & 0xFF, t & 0xFF))
 
-    if repeat_units:
-        rep_us = units_to_us(repeat_units)
-        reps = 1
-        if repeat and hold_ms > 0:
-            target_us = hold_ms * 1000
-            period = sum(rep_us) or 1
-            if target_us > period:
-                reps = (target_us + period - 1) // period
-            reps = min(max(reps, 1), max(1, repeat_cap))
-        for _ in range(reps):
-            pulses.extend(rep_us)
-    elif not intro_units:
-        # Entire body fallback (declared counts zero or absent)
-        body = words[4:]
-        if len(body) % 2 == 1:
-            body = body[:-1]
-        pulses.extend(units_to_us(body))
+    # Build packet
+    header = bytes((0x26, 0x00))
+    length_le = bytes((len(payload) & 0xFF, (len(payload) >> 8) & 0xFF))
+    tail = bytes((0x0D, 0x05))
+    packet = bytearray(header + length_le + payload + tail)
 
-    if ensure_even and (len(pulses) % 2 == 1):
-        pulses.append(_SMALL_OFF_GAP_US)
+    # Pad to multiple of 16 bytes (AES requirement)
+    while len(packet) % 16 != 0:
+        packet.append(0x00)
 
-    if add_trailing_silence and trailing_silence_us > 0:
-        pulses.append(trailing_silence_us)
+    int_list = list(packet)
+    return bytes(packet)
 
-    return pulses
+
+# ---------------------------------------------------------------------------
+# Pulses (µs) → BroadLink payload bytes
+# ---------------------------------------------------------------------------
+
+
+def pulses_to_broadlink_data(pulses_us: List[int]) -> bytes:
+    """
+    Encode microsecond pulses to BroadLink IR payload bytes:
+
+      - ticks = floor(us * 269 / 8192); ticks may be 0
+      - if ticks < 256 → one byte
+      - else → 0x00 + two-byte big-endian ticks
+      - packet = [0x26, 0x00] + [len LE 2 bytes] + [encoded pulses] + [0x0D, 0x05]
+      - pad to multiple of 16 bytes with zeros
+    """
+    payload: bytearray = bytearray()
+    for us in pulses_us:
+        if us < 0:
+            raise ValueError("Negative pulse not allowed")
+        t = int((us * BRDLNK_UNIT) // 1)  # floor
+        if t < 256:
+            payload.append(t & 0xFF)
+        else:
+            payload.extend((0x00, (t >> 8) & 0xFF, t & 0xFF))
+
+    header = bytes((0x26, 0x00))
+    length_le = bytes((len(payload) & 0xFF, (len(payload) >> 8) & 0xFF))
+    tail = bytes((0x0D, 0x05))
+    packet = bytearray(header + length_le + payload + tail)
+
+    # Pad to multiple of 16 bytes (AES requirement)
+    while len(packet) % 16 != 0:
+        packet.append(0x00)
+
+    return bytes(packet)
 
 
 # ---------------------------------------------------------------------------
@@ -296,58 +284,31 @@ def _normalize_non_pronto(data: Union[str, List[int]]) -> List[int]:
 # ---------------------------------------------------------------------------
 
 
-def convert_to_broadlink(
-    code: Union[str, List[int]],
-    **pronto_kwargs,
-) -> bytes:
+def convert_to_broadlink(code: Union[str, List[int]]) -> bytes:
     """
     Convert any supported IR representation to a BroadLink raw packet (bytes).
 
     Accepts:
-      - PRONTO 0000 (auto-detected)
-      - Global Caché sendir
-      - NEC custom
-      - list[int] pulses (µs)
-      - BroadLink raw HEX (starts with '26')
-
-    Additional keyword args are passed directly to `pronto_to_pulses` for PRONTO input
-    (e.g., hold_ms=0 to disable expansion, add_trailing_silence=False to skip trailing gap).
-
-    Examples:
-        convert_to_broadlink(pronto_code)  # default advanced behavior
-        convert_to_broadlink(pronto_code, hold_ms=0, repeat=False, add_trailing_silence=False)
-        convert_to_broadlink(gcsendir_code)
-        convert_to_broadlink(nec_code_str)
-        convert_to_broadlink([9000,4500,560,560, ...])  # pulses list
-        convert_to_broadlink("2600...")  # raw BroadLink HEX
+      - BroadLink raw HEX (starts with '26') → passthrough decode
+      - PRONTO 0000 → encode to BroadLink
+      - Global Caché sendir → encode to BroadLink
+      - NEC custom → encode to BroadLink
+      - list[int] pulses (µs) → encode to BroadLink
     """
     if isinstance(code, str):
         stripped = code.strip()
         # Raw BroadLink passthrough
         if _looks_like_broadlink_hex(stripped):
             return hex_to_broadlink(stripped)
-        # PRONTO
+        # PRONTO 0000
         if stripped.startswith("0000"):
-            pulses = pronto_to_pulses(stripped, **pronto_kwargs)
-            return pulses_to_data(pulses)
-        # Other recognized text formats
+            return pronto_to_broadlink(stripped)
+        # Other recognized text formats → pulses
         pulses = _normalize_non_pronto(stripped)
-        return pulses_to_data(pulses)
+        return pulses_to_broadlink_data(pulses)
 
     # Already a list of pulses
     if isinstance(code, list):
-        return pulses_to_data(code)
+        return pulses_to_broadlink_data(code)
 
     raise TypeError("Unsupported code type")
-
-
-def pronto_to_broadlink(
-    pronto_hex: str,
-    **kwargs,
-) -> bytes:
-    """
-    Convenience wrapper: PRONTO → BroadLink bytes.
-    Keyword args forwarded to pronto_to_pulses.
-    """
-    pulses = pronto_to_pulses(pronto_hex, **kwargs)
-    return pulses_to_data(pulses)
