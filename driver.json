@@ -1,9 +1,9 @@
 {
   "driver_id": "broadlink_driver",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "min_core_api": "0.20.0",
   "name": { "en": "Broadlink" },
-  "icon": "uc:pulse",
+  "icon": "uc:wave-pulse",
   "description": {
     "en": "Control your Broadlink devices with Remote Two/3.",
     "de": "Steuere deine Broadlink-Geräte mit Remote Two/3.",
