@@ -17,7 +17,6 @@ from broadlink.exceptions import BroadlinkException, ReadError, StorageError
 from config import BroadlinkDevice
 from pyee.asyncio import AsyncIOEventEmitter
 from ucapi import StatusCodes
-from ir_converter import convert_to_broadlink
 
 
 _LOG = logging.getLogger(__name__)
@@ -61,7 +60,7 @@ class Broadlink:
         self._loop: AbstractEventLoop = loop or asyncio.get_running_loop()
         self.events = AsyncIOEventEmitter(self._loop)
         self._is_connected: bool = False
-        self._broadlink: broadlink | None = None
+        self._broadlink: broadlink.Device | None = None
         self._device: BroadlinkDevice = device
         self._state: PowerState = PowerState.OFF
         self._source_list: list[str] = []
@@ -111,7 +110,7 @@ class Broadlink:
 
     async def connect(self) -> None:
         """Establish connection to the AVR."""
-        if self.state != PowerState.OFF:
+        if self._is_connected or self._broadlink:
             return
 
         _LOG.debug("[%s] Connecting to device", self.log_id)
@@ -156,22 +155,22 @@ class Broadlink:
             self.address,
         )
         try:
-            devices = broadlink.xdiscover(
+            devices = broadlink.discover(
                 discover_ip_address=self._device.address, timeout=1
             )
             for self._broadlink in devices:
                 self._broadlink.auth()
-                self._broadlink.hello()
                 self._state = PowerState.ON
-                if not self._broadlink:
-                    self._state = PowerState.OFF
+                self._is_connected = True
         except Exception as err:  # pylint: disable=broad-exception-caught
             _LOG.error("[%s] Connection error: %s", self.log_id, err)
             self._state = PowerState.OFF
+            self._is_connected = False
+            self._broadlink = None
 
     async def send_command(self, predefined_code: str = None, code: str = None) -> str:
         """Send a command to the Broadlink."""
-        update = {}
+        await self.connect()
         self.events.emit(
             EVENTS.UPDATE,
             self._device.identifier,

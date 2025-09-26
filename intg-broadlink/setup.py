@@ -1,5 +1,5 @@
 """
-Setup flow for Yamaha AVR Remote integration.
+Setup flow for Broadlink Remote integration.
 
 :copyright: (c) 2023-2024 by Unfolded Circle ApS.
 :license: Mozilla Public License Version 2.0, see LICENSE for more details.
@@ -39,7 +39,7 @@ _setup_step = SetupSteps.INIT
 _cfg_add_device: bool = False
 
 _user_input_manual = RequestUserInput(
-    {"en": "Yamaha AVR Setup"},
+    {"en": "Broadlink Setup"},
     [
         {
             "id": "info",

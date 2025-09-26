@@ -1,4 +1,4 @@
-# Yamaha AVR integration for Remote Two/3 Changelog
+# Broadlink integration for Remote Two/3 Changelog
 
 All notable changes to this project will be documented in this file.
 

@@ -67,7 +67,7 @@ async def on_r2_enter_standby() -> None:
     """
     Enter standby notification from Remote Two.
 
-    Disconnect every Yamaha AVR instances.
+    Disconnect every Broadlink instance.
     """
     _LOG.debug("Enter standby event: disconnecting device(s)")
     # for device in _configured_devices.values():
@@ -118,7 +118,7 @@ async def on_subscribe_entities(entity_ids: list[str]) -> None:
             _add_configured_device(device)
         else:
             _LOG.error(
-                "Failed to subscribe entity %s: no Yamaha AVR instance found", entity_id
+                "Failed to subscribe entity %s: no Broadlink instance found", entity_id
             )
 
 

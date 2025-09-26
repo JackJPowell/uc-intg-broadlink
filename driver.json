@@ -32,7 +32,7 @@
         "field": {
           "label": {
             "value": {
-              "en": "This integration will allow you to control Yamaha AVRs on your network."
+              "en": "This integration will allow you to control Broadlink devices on your network."
             }
           }
         }
