@@ -55,10 +55,10 @@ There are three main modes when interacting with the integration: Learning, Dele
 Let's start by learning a new command.
 1. Place a new button on the screen and select `Send Command`.
 2. `Command` will take a set of options separated by `:`.
-  2.1. `MODE`:`FREQUENCY_TYPE`:`DEVICE`:`COMMAND`  e.g. `LEARN:RF:FAN:ON` or `LEARN:IR:RECEIVER:TOGGLE`
-  2.2. Once clicked, the media player you placed on the screen will walk you through the learning process. (Must be done on device)
-  2.3. Specifically for RF, you can optionally include the frequency at the end of the command and skip the frequency scanning process. `LEARN:RF:FAN:ON:332.0`
-3. Once learned, the included media player entity will update its `source list` with your new command.
+    1. `MODE`:`FREQUENCY_TYPE`:`DEVICE`:`COMMAND`  e.g. `LEARN:RF:FAN:ON` or `LEARN:IR:RECEIVER:TOGGLE`
+    2. Once clicked, the media player you placed on the screen will walk you through the learning process. (Must be done on device)
+    3. Specifically for RF, you can optionally include the frequency at the end of the command and skip the frequency scanning process. `LEARN:RF:FAN:ON:332.0`
+4. Once learned, the included media player entity will update its `source list` with your new command.
 
 https://github.com/user-attachments/assets/aa6e8d70-9d75-4ca8-8861-e6242c4c4fb9
 
