@@ -7,12 +7,13 @@ Remote entity functions.
 import logging
 from typing import Any
 
-from config import BroadlinkDevice, create_entity_id
+from rm import Broadlink
+from config import BroadlinkDevice
 from ucapi import EntityTypes, Remote, StatusCodes
 from ucapi.media_player import States as MediaStates
 from ucapi.remote import Attributes, Commands, Features
 from ucapi.remote import States as RemoteStates
-import rm
+from ucapi_framework import create_entity_id
 
 _LOG = logging.getLogger(__name__)
 
@@ -29,14 +30,13 @@ BROADLINK_REMOTE_STATE_MAPPING = {
 class BroadlinkRemote(Remote):
     """Representation of a Broadlink Remote entity."""
 
-    def __init__(self, config_device: BroadlinkDevice, device: rm.Broadlink):
+    def __init__(self, config_device: BroadlinkDevice, device: Broadlink):
         """Initialize the class."""
-        self._device: rm.Broadlink = device
+        self._device = device
         _LOG.debug("Broadlink Remote init")
-        entity_id = create_entity_id(config_device.identifier, EntityTypes.REMOTE)
         features = [Features.SEND_CMD]
         super().__init__(
-            entity_id,
+            create_entity_id(EntityTypes.REMOTE, config_device.identifier),
             f"{config_device.name} Remote",
             features,
             attributes={

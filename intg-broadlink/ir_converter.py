@@ -18,10 +18,10 @@ Convenience helpers:
 
 from __future__ import annotations
 
-import logging
-from typing import List, Union
 import binascii
+import logging
 import re
+from typing import List, Union
 
 _LOG = logging.getLogger(__name__)
 

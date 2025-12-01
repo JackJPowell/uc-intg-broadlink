@@ -6,21 +6,15 @@ Media-player entity functions.
 
 import logging
 from typing import Any
-import asyncio
-import ucapi
-import ucapi.api as uc
 
 import rm
-from config import BroadlinkDevice, create_entity_id
-from ucapi import MediaPlayer, media_player, EntityTypes
-from ucapi.media_player import DeviceClasses, Attributes
-
-_LOOP = asyncio.new_event_loop()
-asyncio.set_event_loop(_LOOP)
+import ucapi
+from config import BroadlinkDevice
+from ucapi import EntityTypes, MediaPlayer, media_player
+from ucapi.media_player import Attributes, DeviceClasses
+from ucapi_framework import create_entity_id
 
 _LOG = logging.getLogger(__name__)
-api = uc.IntegrationAPI(_LOOP)
-_configured_devices: dict[str, rm.Broadlink] = {}
 
 features = [
     media_player.Features.SELECT_SOURCE,
@@ -35,11 +29,10 @@ class BroadlinkMediaPlayer(MediaPlayer):
         """Initialize the class."""
         self._device = device
         _LOG.debug("Broadlink Media Player init")
-        entity_id = create_entity_id(config_device.identifier, EntityTypes.MEDIA_PLAYER)
         self.config = config_device
         self.options = []
         super().__init__(
-            entity_id,
+            create_entity_id(EntityTypes.MEDIA_PLAYER, config_device.identifier),
             config_device.name,
             features,
             attributes={
