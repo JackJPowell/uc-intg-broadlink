@@ -320,7 +320,7 @@ class Broadlink(StatelessHTTPDevice):
         )
         self.events.emit(
             EVENTS.UPDATE,
-            self.identifier,
+            create_entity_id(EntityTypes.MEDIA_PLAYER, self.identifier),
             {
                 MediaAttr.MEDIA_TITLE: f"{device}:{command}",
                 MediaAttr.MEDIA_ARTIST: status,

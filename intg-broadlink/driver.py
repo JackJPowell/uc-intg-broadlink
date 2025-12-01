@@ -45,7 +45,7 @@ async def main():
     )
 
     for device in list(driver.config.all()):
-        driver.add_configured_device(device, connect=False)
+        driver.add_configured_device(device)
 
     discovery = BroadlinkDiscovery(timeout=1)
     setup_handler = BroadlinkSetupFlow.create_handler(

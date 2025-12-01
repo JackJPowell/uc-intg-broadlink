@@ -1,4 +1,4 @@
-"""Discover JVC Projectors in local network using SDDP protocol."""
+"""Discover Broadlink devices in local network using SDDP protocol."""
 
 import logging
 from typing import Any
@@ -11,15 +11,13 @@ _LOG = logging.getLogger(__name__)
 
 
 class BroadlinkDiscovery(BaseDiscovery):
-    """Discover Broadlink devices in local network using SDDP protocol."""
+    """Discover Broadlink devices in local network using custom protocol."""
 
     async def discover(self) -> list[DiscoveredDevice]:
         """
-        Parse Discovery responses and return list of DiscoveredDevice.
+        Parse Discovery responses and return a list of DiscoveredDevice.
 
-        :param datagram: SDDP datagram with headers (hdr_from, hdr_type, etc.)
-        :param response_info: Full response info object from SDDP client
-        :return: DiscoveredDevice or None if parsing fails
+        :return: List of DiscoveredDevice objects discovered in the local network.
         """
 
         devices = broadlink.discover(timeout=self.timeout)

@@ -53,7 +53,7 @@ class BroadlinkSetupFlow(BaseSetupFlow[BroadlinkDevice]):
     """
     Setup flow for Broadlink integration.
 
-    Handles Broadlink device configuration through SSDP discovery or manual entry.
+    Handles Broadlink device configuration through Broadlink protocol discovery or manual entry.
     """
 
     def get_manual_entry_form(self) -> RequestUserInput:
