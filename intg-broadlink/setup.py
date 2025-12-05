@@ -9,7 +9,7 @@ import logging
 from typing import Any
 
 import broadlink
-from config import BroadlinkDevice
+from config import BroadlinkConfig
 from ucapi import (
     IntegrationSetupError,
     RequestUserInput,
@@ -49,7 +49,7 @@ _MANUAL_INPUT_SCHEMA = RequestUserInput(
 )
 
 
-class BroadlinkSetupFlow(BaseSetupFlow[BroadlinkDevice]):
+class BroadlinkSetupFlow(BaseSetupFlow[BroadlinkConfig]):
     """
     Setup flow for Broadlink integration.
 
@@ -66,7 +66,7 @@ class BroadlinkSetupFlow(BaseSetupFlow[BroadlinkDevice]):
 
     async def query_device(
         self, input_values: dict[str, Any]
-    ) -> BroadlinkDevice | SetupError | RequestUserInput:
+    ) -> BroadlinkConfig | SetupError | RequestUserInput:
         address = input_values["address"]
 
         if address is None or address == "":
@@ -95,7 +95,7 @@ class BroadlinkSetupFlow(BaseSetupFlow[BroadlinkDevice]):
                 )
                 raise IntegrationSetupError("Device already configured")
 
-            return BroadlinkDevice(
+            return BroadlinkConfig(
                 identifier=device.mac.hex(),
                 name=device.name,
                 address=address,

@@ -7,11 +7,11 @@ Configuration handling of the integration driver.
 
 from dataclasses import dataclass
 
-from ucapi_framework import BaseDeviceManager
+from ucapi_framework import BaseConfigManager
 
 
 @dataclass
-class BroadlinkDevice:
+class BroadlinkConfig:
     """Broadlink device configuration."""
 
     identifier: str
@@ -24,7 +24,7 @@ class BroadlinkDevice:
     """List of codes for the device, if any."""
 
 
-class BroadlinkDeviceManager(BaseDeviceManager[BroadlinkDevice]):
+class BroadlinkConfigManager(BaseConfigManager[BroadlinkConfig]):
     """Integration driver configuration class. Manages all configured Broadlink devices."""
 
     @property

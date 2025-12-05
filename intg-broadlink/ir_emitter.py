@@ -9,7 +9,7 @@ from enum import Enum
 from typing import Any
 
 from rm import Broadlink
-from config import BroadlinkDevice
+from config import BroadlinkConfig
 from ir_converter import convert_to_broadlink
 from ucapi import Entity, StatusCodes
 from ucapi.media_player import States as MediaStates
@@ -38,7 +38,7 @@ class EntityTypes(str, Enum):
 class BroadlinkIREmitter(Entity):
     """Representation of a Broadlink IR Emitter entity."""
 
-    def __init__(self, config_device: BroadlinkDevice, device: Broadlink):
+    def __init__(self, config_device: BroadlinkConfig, device: Broadlink):
         """Initialize the class."""
         self._device = device
         _LOG.debug("Broadlink IR Emitter init")

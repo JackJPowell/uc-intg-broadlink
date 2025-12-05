@@ -12,10 +12,10 @@ from enum import StrEnum
 
 import broadlink
 from broadlink.exceptions import BroadlinkException, ReadError, StorageError
-from ucapi_framework import create_entity_id
-from config import BroadlinkDevice, BroadlinkDeviceManager
-from ucapi import StatusCodes, EntityTypes
+from config import BroadlinkConfig, BroadlinkConfigManager
+from ucapi import EntityTypes, StatusCodes
 from ucapi.media_player import Attributes as MediaAttr
+from ucapi_framework import create_entity_id
 from ucapi_framework.device import StatelessHTTPDevice, DeviceEvents as EVENTS
 
 _LOG = logging.getLogger(__name__)
@@ -36,14 +36,14 @@ class Broadlink(StatelessHTTPDevice):
 
     def __init__(
         self,
-        device: BroadlinkDevice,
+        device_config: BroadlinkConfig,
         loop: AbstractEventLoop | None = None,
-        config_manager: BroadlinkDeviceManager | None = None,
+        config_manager: BroadlinkConfigManager | None = None,
     ) -> None:
         """Create instance."""
-        super().__init__(device, loop, config_manager)
+        super().__init__(device_config, loop, config_manager)
+        self._device_config: BroadlinkConfig
         self._broadlink: broadlink.Device | None = None
-        self._device: BroadlinkDevice = device
         self._state: PowerState = PowerState.OFF
         self._source_list: list[str] = []
         self._source: str | None = None
@@ -51,24 +51,28 @@ class Broadlink(StatelessHTTPDevice):
     @property
     def identifier(self) -> str:
         """Return the device identifier."""
-        if not self._device.identifier:
+        if not self._device_config.identifier:
             raise ValueError("Instance not initialized, no identifier available")
-        return self._device.identifier
+        return self._device_config.identifier
 
     @property
     def log_id(self) -> str:
         """Return a log identifier."""
-        return self._device.name if self._device.name else self._device.identifier
+        return (
+            self._device_config.name
+            if self._device_config.name
+            else self._device_config.identifier
+        )
 
     @property
     def name(self) -> str:
         """Return the device name."""
-        return self._device.name
+        return self._device_config.name
 
     @property
     def address(self) -> str | None:
         """Return the optional device address."""
-        return self._device.address
+        return self._device_config.address
 
     @property
     def state(self) -> PowerState | None:
@@ -93,12 +97,11 @@ class Broadlink(StatelessHTTPDevice):
             self.address,
         )
         try:
-            devices = broadlink.discover(
-                discover_ip_address=self._device.address, timeout=1
+            self._broadlink = broadlink.hello(
+                ip_address=self._device_config.address, timeout=2
             )
-            for self._broadlink in devices:
-                self._broadlink.auth()
-                self._state = PowerState.ON
+            self._broadlink.auth()
+            self._state = PowerState.ON
         except Exception as err:
             _LOG.error("[%s] Connection verification error: %s", self.log_id, err)
             self._state = PowerState.OFF
@@ -117,6 +120,16 @@ class Broadlink(StatelessHTTPDevice):
                     MediaAttr.MEDIA_TITLE: "",
                     MediaAttr.MEDIA_ARTIST: "",
                 },
+            )
+            self.events.emit(
+                EVENTS.UPDATE,
+                create_entity_id(EntityTypes.REMOTE, self.identifier),
+                {MediaAttr.STATE: "ON"},
+            )
+            self.events.emit(
+                EVENTS.UPDATE,
+                create_entity_id(EntityTypes.IR_EMITTER, self.identifier),
+                {MediaAttr.STATE: "ON"},
             )
         else:
             _LOG.debug("[%s] Device is not alive", self.log_id)
@@ -334,7 +347,7 @@ class Broadlink(StatelessHTTPDevice):
         """Reload the sources for the device."""
         _LOG.debug("[%s] Reloading sources for device", self.log_id)
         self._source_list.clear()
-        for name, command in self._device.data.items():
+        for name, command in self._device_config.data.items():
             for cmd_name, _ in command.items():
                 self._source_list.append(f"{name}:{cmd_name}")
 

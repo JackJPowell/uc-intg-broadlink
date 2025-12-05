@@ -9,7 +9,7 @@ import asyncio
 import logging
 import os
 
-from config import BroadlinkDevice, BroadlinkDeviceManager
+from config import BroadlinkConfig, BroadlinkConfigManager
 from discover import BroadlinkDiscovery
 from ir_emitter import BroadlinkIREmitter
 from media_player import BroadlinkMediaPlayer
@@ -30,27 +30,21 @@ async def main():
     logging.getLogger("discover").setLevel(level)
     logging.getLogger("setup").setLevel(level)
 
-    loop = asyncio.get_running_loop()
-
     driver = BaseIntegrationDriver(
-        loop=loop,
         device_class=Broadlink,
         entity_classes=[BroadlinkMediaPlayer, BroadlinkRemote, BroadlinkIREmitter],
     )
-    driver.config = BroadlinkDeviceManager(
+    driver.config_manager = BroadlinkConfigManager(
         get_config_path(driver.api.config_dir_path),
         driver.on_device_added,
         driver.on_device_removed,
-        device_class=BroadlinkDevice,
+        config_class=BroadlinkConfig,
     )
 
-    for device in list(driver.config.all()):
-        driver.add_configured_device(device)
+    await driver.register_all_configured_devices()
 
     discovery = BroadlinkDiscovery(timeout=1)
-    setup_handler = BroadlinkSetupFlow.create_handler(
-        driver.config, discovery=discovery
-    )
+    setup_handler = BroadlinkSetupFlow.create_handler(driver, discovery=discovery)
     await driver.api.init("driver.json", setup_handler)
 
     await asyncio.Future()

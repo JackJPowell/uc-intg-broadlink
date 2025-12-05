@@ -8,7 +8,7 @@ import logging
 from typing import Any
 
 from rm import Broadlink
-from config import BroadlinkDevice
+from config import BroadlinkConfig
 from ucapi import EntityTypes, Remote, StatusCodes
 from ucapi.media_player import States as MediaStates
 from ucapi.remote import Attributes, Commands, Features
@@ -30,7 +30,7 @@ BROADLINK_REMOTE_STATE_MAPPING = {
 class BroadlinkRemote(Remote):
     """Representation of a Broadlink Remote entity."""
 
-    def __init__(self, config_device: BroadlinkDevice, device: Broadlink):
+    def __init__(self, config_device: BroadlinkConfig, device: Broadlink):
         """Initialize the class."""
         self._device = device
         _LOG.debug("Broadlink Remote init")

@@ -9,7 +9,7 @@ from typing import Any
 
 import rm
 import ucapi
-from config import BroadlinkDevice
+from config import BroadlinkConfig
 from ucapi import EntityTypes, MediaPlayer, media_player
 from ucapi.media_player import Attributes, DeviceClasses
 from ucapi_framework import create_entity_id
@@ -25,11 +25,10 @@ features = [
 class BroadlinkMediaPlayer(MediaPlayer):
     """Representation of a Broadlink MediaPlayer entity."""
 
-    def __init__(self, config_device: BroadlinkDevice, device: rm.Broadlink):
+    def __init__(self, config_device: BroadlinkConfig, device: rm.Broadlink):
         """Initialize the class."""
         self._device = device
         _LOG.debug("Broadlink Media Player init")
-        self.config = config_device
         self.options = []
         super().__init__(
             create_entity_id(EntityTypes.MEDIA_PLAYER, config_device.identifier),
@@ -77,9 +76,3 @@ class BroadlinkMediaPlayer(MediaPlayer):
             _LOG.error("Error executing command %s: %s", cmd_id, ex)
             return ucapi.StatusCodes.BAD_REQUEST
         return ucapi.StatusCodes.OK
-
-
-def _get_cmd_param(name: str, params: dict[str, Any] | None) -> str | bool | None:
-    if params is None:
-        return None
-    return params.get(name)
