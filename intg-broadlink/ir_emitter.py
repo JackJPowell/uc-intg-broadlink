@@ -5,15 +5,17 @@ Remote entity functions.
 """
 
 import logging
-from typing import Any
 from enum import Enum
-from config import BroadlinkDevice, create_entity_id
-from ucapi import StatusCodes, Entity
+from typing import Any
+
+from rm import Broadlink
+from config import BroadlinkConfig
+from ir_converter import convert_to_broadlink
+from ucapi import Entity, StatusCodes
 from ucapi.media_player import States as MediaStates
 from ucapi.remote import Attributes, Commands
 from ucapi.remote import States as RemoteStates
-import rm
-from ir_converter import convert_to_broadlink
+from ucapi_framework import create_entity_id
 
 _LOG = logging.getLogger(__name__)
 
@@ -36,14 +38,13 @@ class EntityTypes(str, Enum):
 class BroadlinkIREmitter(Entity):
     """Representation of a Broadlink IR Emitter entity."""
 
-    def __init__(self, config_device: BroadlinkDevice, device: rm.Broadlink):
+    def __init__(self, config_device: BroadlinkConfig, device: Broadlink):
         """Initialize the class."""
-        self._device: rm.Broadlink = device
+        self._device = device
         _LOG.debug("Broadlink IR Emitter init")
-        entity_id = create_entity_id(config_device.identifier, "ir_emitter")
         features = ["send_ir"]
         super().__init__(
-            entity_id,
+            create_entity_id("ir_emitter", config_device.identifier),
             f"{config_device.name} IR Emitter",
             EntityTypes.IR_EMITTER,
             features,

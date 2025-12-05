@@ -6,21 +6,15 @@ Media-player entity functions.
 
 import logging
 from typing import Any
-import asyncio
-import ucapi
-import ucapi.api as uc
 
 import rm
-from config import BroadlinkDevice, create_entity_id
-from ucapi import MediaPlayer, media_player, EntityTypes
-from ucapi.media_player import DeviceClasses, Attributes
-
-_LOOP = asyncio.new_event_loop()
-asyncio.set_event_loop(_LOOP)
+import ucapi
+from config import BroadlinkConfig
+from ucapi import EntityTypes, MediaPlayer, media_player
+from ucapi.media_player import Attributes, DeviceClasses
+from ucapi_framework import create_entity_id
 
 _LOG = logging.getLogger(__name__)
-api = uc.IntegrationAPI(_LOOP)
-_configured_devices: dict[str, rm.Broadlink] = {}
 
 features = [
     media_player.Features.SELECT_SOURCE,
@@ -31,15 +25,13 @@ features = [
 class BroadlinkMediaPlayer(MediaPlayer):
     """Representation of a Broadlink MediaPlayer entity."""
 
-    def __init__(self, config_device: BroadlinkDevice, device: rm.Broadlink):
+    def __init__(self, config_device: BroadlinkConfig, device: rm.Broadlink):
         """Initialize the class."""
         self._device = device
         _LOG.debug("Broadlink Media Player init")
-        entity_id = create_entity_id(config_device.identifier, EntityTypes.MEDIA_PLAYER)
-        self.config = config_device
         self.options = []
         super().__init__(
-            entity_id,
+            create_entity_id(EntityTypes.MEDIA_PLAYER, config_device.identifier),
             config_device.name,
             features,
             attributes={
@@ -84,9 +76,3 @@ class BroadlinkMediaPlayer(MediaPlayer):
             _LOG.error("Error executing command %s: %s", cmd_id, ex)
             return ucapi.StatusCodes.BAD_REQUEST
         return ucapi.StatusCodes.OK
-
-
-def _get_cmd_param(name: str, params: dict[str, Any] | None) -> str | bool | None:
-    if params is None:
-        return None
-    return params.get(name)

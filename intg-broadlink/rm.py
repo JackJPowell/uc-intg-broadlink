@@ -8,38 +8,19 @@ import logging
 from asyncio import AbstractEventLoop
 from base64 import b64decode, b64encode
 from datetime import UTC, datetime, timedelta
-from enum import IntEnum, StrEnum
-from typing import ParamSpec, TypeVar
+from enum import StrEnum
 
 import broadlink
-import config as BroadlinkConfig
 from broadlink.exceptions import BroadlinkException, ReadError, StorageError
-from config import BroadlinkDevice
-from pyee.asyncio import AsyncIOEventEmitter
-from ucapi import StatusCodes
-
+from config import BroadlinkConfig, BroadlinkConfigManager
+from ucapi import EntityTypes, StatusCodes
+from ucapi.media_player import Attributes as MediaAttr
+from ucapi_framework import create_entity_id
+from ucapi_framework.device import StatelessHTTPDevice, DeviceEvents as EVENTS
 
 _LOG = logging.getLogger(__name__)
 
-BACKOFF_MAX = 30
-BACKOFF_SEC = 2
-
 LEARNING_TIMEOUT = timedelta(seconds=30)
-
-
-class EVENTS(IntEnum):
-    """Internal driver events."""
-
-    CONNECTING = 0
-    CONNECTED = 1
-    DISCONNECTED = 2
-    PAIRED = 3
-    ERROR = 4
-    UPDATE = 5
-
-
-_BroadlinkDeviceT = TypeVar("_BroadlinkDeviceT", bound="BroadlinkDevice")
-_P = ParamSpec("_P")
 
 
 class PowerState(StrEnum):
@@ -50,48 +31,48 @@ class PowerState(StrEnum):
     STANDBY = "STANDBY"
 
 
-class Broadlink:
+class Broadlink(StatelessHTTPDevice):
     """Representing a Broadlink Device."""
 
     def __init__(
-        self, device: BroadlinkDevice, loop: AbstractEventLoop | None = None
+        self,
+        device_config: BroadlinkConfig,
+        loop: AbstractEventLoop | None = None,
+        config_manager: BroadlinkConfigManager | None = None,
     ) -> None:
         """Create instance."""
-        self._loop: AbstractEventLoop = loop or asyncio.get_running_loop()
-        self.events = AsyncIOEventEmitter(self._loop)
-        self._is_connected: bool = False
+        super().__init__(device_config, loop, config_manager)
+        self._device_config: BroadlinkConfig
         self._broadlink: broadlink.Device | None = None
-        self._device: BroadlinkDevice = device
         self._state: PowerState = PowerState.OFF
         self._source_list: list[str] = []
         self._source: str | None = None
 
     @property
-    def device_config(self) -> BroadlinkDevice:
-        """Return the device configuration."""
-        return self._device
-
-    @property
     def identifier(self) -> str:
         """Return the device identifier."""
-        if not self._device.identifier:
+        if not self._device_config.identifier:
             raise ValueError("Instance not initialized, no identifier available")
-        return self._device.identifier
+        return self._device_config.identifier
 
     @property
     def log_id(self) -> str:
         """Return a log identifier."""
-        return self._device.name if self._device.name else self._device.identifier
+        return (
+            self._device_config.name
+            if self._device_config.name
+            else self._device_config.identifier
+        )
 
     @property
     def name(self) -> str:
         """Return the device name."""
-        return self._device.name
+        return self._device_config.name
 
     @property
     def address(self) -> str | None:
         """Return the optional device address."""
-        return self._device.address
+        return self._device_config.address
 
     @property
     def state(self) -> PowerState | None:
@@ -108,81 +89,71 @@ class Broadlink:
         """Return the device source list."""
         return self._source_list
 
-    async def connect(self) -> None:
-        """Establish connection to the AVR."""
-        if self._is_connected or self._broadlink:
-            return
-
-        _LOG.debug("[%s] Connecting to device", self.log_id)
-        self.events.emit(EVENTS.CONNECTING, self._device.identifier)
-        await self._connect_setup()
-
-    async def _connect_setup(self) -> None:
-        try:
-            await self._connect()
-
-            if self.state != PowerState.OFF:
-                _LOG.debug("[%s] Device is alive", self.log_id)
-                self.reload_sources()
-                self.events.emit(
-                    EVENTS.UPDATE,
-                    self._device.identifier,
-                    {
-                        "state": self.state,
-                        "source_list": self.source_list,
-                        "title": "",
-                        "artist": "",
-                    },
-                )
-            else:
-                _LOG.debug("[%s] Device is not alive", self.log_id)
-                self.events.emit(
-                    EVENTS.UPDATE,
-                    self._device.identifier,
-                    {"state": PowerState.OFF},
-                )
-        except Exception as err:  # pylint: disable=broad-exception-caught
-            _LOG.error("[%s] Could not connect: %s", self.log_id, err)
-
-        self.events.emit(EVENTS.CONNECTED, self._device.identifier)
-        _LOG.debug("[%s] Connected", self.log_id)
-
-    async def _connect(self) -> None:
-        """Connect to the device."""
+    async def verify_connection(self) -> None:
+        """Verify the device connection by discovering and authenticating."""
         _LOG.debug(
-            "[%s] Connecting to TVWS device at IP address: %s",
+            "[%s] Verifying connection to device at IP address: %s",
             self.log_id,
             self.address,
         )
         try:
-            devices = broadlink.discover(
-                discover_ip_address=self._device.address, timeout=1
+            self._broadlink = broadlink.hello(
+                ip_address=self._device_config.address, timeout=2
             )
-            for self._broadlink in devices:
-                self._broadlink.auth()
-                self._state = PowerState.ON
-                self._is_connected = True
-        except Exception as err:  # pylint: disable=broad-exception-caught
-            _LOG.error("[%s] Connection error: %s", self.log_id, err)
+            self._broadlink.auth()
+            self._state = PowerState.ON
+        except Exception as err:
+            _LOG.error("[%s] Connection verification error: %s", self.log_id, err)
             self._state = PowerState.OFF
-            self._is_connected = False
             self._broadlink = None
+            raise
+
+        if self._state == PowerState.ON:
+            _LOG.debug("[%s] Device is alive", self.log_id)
+            self.reload_sources()
+            self.events.emit(
+                EVENTS.UPDATE,
+                create_entity_id(EntityTypes.MEDIA_PLAYER, self.identifier),
+                {
+                    MediaAttr.STATE: self.state,
+                    MediaAttr.SOURCE_LIST: self.source_list,
+                    MediaAttr.MEDIA_TITLE: "",
+                    MediaAttr.MEDIA_ARTIST: "",
+                },
+            )
+            self.events.emit(
+                EVENTS.UPDATE,
+                create_entity_id(EntityTypes.REMOTE, self.identifier),
+                {MediaAttr.STATE: "ON"},
+            )
+            self.events.emit(
+                EVENTS.UPDATE,
+                create_entity_id(EntityTypes.IR_EMITTER, self.identifier),
+                {MediaAttr.STATE: "ON"},
+            )
+        else:
+            _LOG.debug("[%s] Device is not alive", self.log_id)
+            self.events.emit(
+                EVENTS.UPDATE,
+                create_entity_id(EntityTypes.MEDIA_PLAYER, self.identifier),
+                {MediaAttr.STATE: "OFF"},
+            )
 
     async def send_command(self, predefined_code: str = None, code: str = None) -> str:
         """Send a command to the Broadlink."""
         await self.connect()
         self.events.emit(
             EVENTS.UPDATE,
-            self._device.identifier,
+            create_entity_id(EntityTypes.MEDIA_PLAYER, self.identifier),
             {
-                "title": "",
-                "artist": "",
+                MediaAttr.MEDIA_TITLE: "",
+                MediaAttr.MEDIA_ARTIST: "",
             },
         )
         if predefined_code:
             device, command = predefined_code.split(":")
-            code = BroadlinkConfig.devices.get_code(
-                self._device.identifier, device.lower(), command.lower()
+            code = self._config_manager.get_code(
+                self.identifier, device.lower(), command.lower()
             )
             if not code:
                 self.emit(device, command, "Not Found")
@@ -235,8 +206,8 @@ class Broadlink:
                 except (ReadError, StorageError):
                     continue
                 b64_code = b64encode(code).decode("utf8")
-                status = BroadlinkConfig.devices.append_code(
-                    self._device.identifier,
+                status = self._config_manager.append_code(
+                    self.identifier,
                     device.lower(),
                     command.lower(),
                     b64_code,
@@ -333,8 +304,8 @@ class Broadlink:
                 _LOG.debug("RF code learned: %s", code)
                 self.emit(device, command, "RF Code learned")
                 b64_code = b64encode(code).decode("utf8")
-                status = BroadlinkConfig.devices.append_code(
-                    self._device.identifier,
+                status = self._config_manager.append_code(
+                    self.identifier,
                     device.lower(),
                     command.lower(),
                     b64_code,
@@ -357,15 +328,15 @@ class Broadlink:
         device = input
         if ":" in input:
             device, command = input.split(":")
-        status = BroadlinkConfig.devices.remove_code(
-            self._device.identifier, device.lower(), command.lower()
+        status = self._config_manager.remove_code(
+            self.identifier, device.lower(), command.lower()
         )
         self.events.emit(
             EVENTS.UPDATE,
-            self._device.identifier,
+            create_entity_id(EntityTypes.MEDIA_PLAYER, self.identifier),
             {
-                "title": f"{device}:{command}",
-                "artist": status,
+                MediaAttr.MEDIA_TITLE: f"{device}:{command}",
+                MediaAttr.MEDIA_ARTIST: status,
             },
         )
 
@@ -376,21 +347,21 @@ class Broadlink:
         """Reload the sources for the device."""
         _LOG.debug("[%s] Reloading sources for device", self.log_id)
         self._source_list.clear()
-        for name, command in self._device.data.items():
+        for name, command in self._device_config.data.items():
             for cmd_name, _ in command.items():
                 self._source_list.append(f"{name}:{cmd_name}")
 
     def emit(self, device, command, message, include_source_list=False) -> None:
         """Emit an event."""
         data = {
-            "title": f"{device}:{command}",
-            "artist": message,
+            MediaAttr.MEDIA_TITLE: f"{device}:{command}",
+            MediaAttr.MEDIA_ARTIST: message,
         }
         if include_source_list:
-            data["source_list"] = self.source_list
+            data[MediaAttr.SOURCE_LIST] = self._source_list
 
         self.events.emit(
             EVENTS.UPDATE,
-            self._device.identifier,
+            create_entity_id(EntityTypes.MEDIA_PLAYER, self.identifier),
             data,
         )
