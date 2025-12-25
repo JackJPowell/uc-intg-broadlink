@@ -5,13 +5,12 @@ Remote entity functions.
 """
 
 import logging
-from enum import Enum
 from typing import Any
 
 from rm import Broadlink
-from config import BroadlinkConfig
+from config_manager import BroadlinkConfig
 from ir_converter import convert_to_broadlink
-from ucapi import Entity, StatusCodes
+from ucapi import Entity, EntityTypes, StatusCodes
 from ucapi.media_player import States as MediaStates
 from ucapi.remote import Attributes, Commands
 from ucapi.remote import States as RemoteStates
@@ -27,12 +26,6 @@ BROADLINK_REMOTE_STATE_MAPPING = {
     MediaStates.STANDBY: RemoteStates.OFF,
     MediaStates.PLAYING: RemoteStates.ON,
 }
-
-
-class EntityTypes(str, Enum):
-    """Entity types."""
-
-    IR_EMITTER = "ir_emitter"
 
 
 class BroadlinkIREmitter(Entity):
@@ -55,7 +48,7 @@ class BroadlinkIREmitter(Entity):
                 "ir_formats": ["PRONTO", "HEX"],
                 "ports": [{"id": "main", "name": "Main"}],
             },
-            cmd_handler=self.command,
+            cmd_handler=self.command_handler,
         )
 
     def get_int_param(self, param: str, params: dict[str, Any], default: int):
@@ -69,16 +62,22 @@ class BroadlinkIREmitter(Entity):
             return int(float(value))
         return default
 
-    async def command(
-        self, cmd_id: str, params: dict[str, Any] | None = None
+    async def command_handler(
+        self,
+        entity: Entity,
+        cmd_id: str,
+        params: dict[str, Any] | None = None,
+        options: Any | None = None,
     ) -> StatusCodes:
         """
         Remote entity command handler.
 
         Called by the integration-API if a command is sent to a configured remote entity.
 
+        :param entity: IR emitter entity
         :param cmd_id: command
         :param params: optional command parameters
+        :param options: optional command options
         :return: status code of the command request
         """
         repeat = 1
@@ -108,8 +107,10 @@ class BroadlinkIREmitter(Entity):
             repeat = 1
 
         if cmd_id == "send_ir":
-            code = convert_to_broadlink(params.get("code"))
-            await self._device.send_command(code=code)
+            code_param = params.get("code") if params else None
+            if code_param:
+                code = convert_to_broadlink(code_param)
+                await self._device.send_command(code=code)
             return StatusCodes.OK
 
         if cmd_id == "stop_ir":

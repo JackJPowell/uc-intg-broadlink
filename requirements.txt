@@ -1,4 +1,4 @@
 pyee>=9.0.0
-ucapi==0.4.0
+ucapi==0.5.1
 broadlink==0.19.0
-ucapi-framework==1.2.2
+ucapi-framework==1.4.0

@@ -9,7 +9,6 @@ import asyncio
 import logging
 import os
 
-from config import BroadlinkConfig, BroadlinkConfigManager
 from discover import BroadlinkDiscovery
 from ir_emitter import BroadlinkIREmitter
 from media_player import BroadlinkMediaPlayer
@@ -17,6 +16,8 @@ from remote import BroadlinkRemote
 from rm import Broadlink
 from setup import BroadlinkSetupFlow
 from ucapi_framework import BaseIntegrationDriver, get_config_path
+
+from config_manager import BroadlinkConfig, BroadlinkConfigManager
 
 
 async def main():

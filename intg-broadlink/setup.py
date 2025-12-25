@@ -9,7 +9,7 @@ import logging
 from typing import Any
 
 import broadlink
-from config import BroadlinkConfig
+from config_manager import BroadlinkConfig
 from ucapi import (
     IntegrationSetupError,
     RequestUserInput,
@@ -93,7 +93,7 @@ class BroadlinkSetupFlow(BaseSetupFlow[BroadlinkConfig]):
                     "Skipping found device %s: already configured",
                     device.name,
                 )
-                raise IntegrationSetupError("Device already configured")
+                return SetupError(IntegrationSetupError.OTHER)
 
             return BroadlinkConfig(
                 identifier=device.mac.hex(),

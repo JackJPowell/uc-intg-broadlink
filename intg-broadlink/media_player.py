@@ -9,7 +9,7 @@ from typing import Any
 
 import rm
 import ucapi
-from config import BroadlinkConfig
+from config_manager import BroadlinkConfig
 from ucapi import EntityTypes, MediaPlayer, media_player
 from ucapi.media_player import Attributes, DeviceClasses
 from ucapi_framework import create_entity_id
@@ -46,7 +46,7 @@ class BroadlinkMediaPlayer(MediaPlayer):
 
     # pylint: disable=too-many-statements
     async def media_player_cmd_handler(
-        self, entity: MediaPlayer, cmd_id: str, params: dict[str, Any] | None
+        self, entity: MediaPlayer, cmd_id: str, params: dict[str, Any] | None = None, options: Any | None = None
     ) -> ucapi.StatusCodes:
         """
         Media-player entity command handler.
@@ -56,6 +56,7 @@ class BroadlinkMediaPlayer(MediaPlayer):
         :param entity: media-player entity
         :param cmd_id: command
         :param params: optional command parameters
+        :param options: optional command options
         :return: status code of the command. StatusCodes.OK if the command succeeded.
         """
         _LOG.info(
@@ -66,7 +67,7 @@ class BroadlinkMediaPlayer(MediaPlayer):
             match cmd_id:
                 case media_player.Commands.SELECT_SOURCE:
                     await self._device.send_command(
-                        predefined_code=params.get("source")
+                        predefined_code=params.get("source") if params else None
                     )
                 case media_player.Commands.SELECT_SOUND_MODE:
                     pass

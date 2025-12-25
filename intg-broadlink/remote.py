@@ -8,7 +8,7 @@ import logging
 from typing import Any
 
 from rm import Broadlink
-from config import BroadlinkConfig
+from config_manager import BroadlinkConfig
 from ucapi import EntityTypes, Remote, StatusCodes
 from ucapi.media_player import States as MediaStates
 from ucapi.remote import Attributes, Commands, Features
@@ -42,7 +42,7 @@ class BroadlinkRemote(Remote):
             attributes={
                 Attributes.STATE: device.state,
             },
-            cmd_handler=self.command,
+            cmd_handler=self.command_handler,
         )
 
     def get_int_param(self, param: str, params: dict[str, Any], default: int):
@@ -56,16 +56,22 @@ class BroadlinkRemote(Remote):
             return int(float(value))
         return default
 
-    async def command(
-        self, cmd_id: str, params: dict[str, Any] | None = None
+    async def command_handler(
+        self,
+        entity: Remote,
+        cmd_id: str,
+        params: dict[str, Any] | None = None,
+        options: Any | None = None,
     ) -> StatusCodes:
         """
         Remote entity command handler.
 
         Called by the integration-API if a command is sent to a configured remote entity.
 
+        :param entity: remote entity
         :param cmd_id: command
         :param params: optional command parameters
+        :param options: optional command options
         :return: status code of the command request
         """
         repeat = 1

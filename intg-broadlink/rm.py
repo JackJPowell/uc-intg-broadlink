@@ -12,11 +12,12 @@ from enum import StrEnum
 
 import broadlink
 from broadlink.exceptions import BroadlinkException, ReadError, StorageError
-from config import BroadlinkConfig, BroadlinkConfigManager
 from ucapi import EntityTypes, StatusCodes
 from ucapi.media_player import Attributes as MediaAttr
 from ucapi_framework import create_entity_id
 from ucapi_framework.device import StatelessHTTPDevice, DeviceEvents as EVENTS
+
+from config_manager import BroadlinkConfig, BroadlinkConfigManager
 
 _LOG = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ class Broadlink(StatelessHTTPDevice):
         """Create instance."""
         super().__init__(device_config, loop, config_manager)
         self._device_config: BroadlinkConfig
+        self._config_manager: BroadlinkConfigManager  # Type narrowing from base class
         self._broadlink: broadlink.Device | None = None
         self._state: PowerState = PowerState.OFF
         self._source_list: list[str] = []
@@ -75,7 +77,7 @@ class Broadlink(StatelessHTTPDevice):
         return self._device_config.address
 
     @property
-    def state(self) -> PowerState | None:
+    def state(self) -> str:
         """Return the device state."""
         return self._state.upper()
 
@@ -96,17 +98,58 @@ class Broadlink(StatelessHTTPDevice):
             self.log_id,
             self.address,
         )
-        try:
-            self._broadlink = broadlink.hello(
-                ip_address=self._device_config.address, timeout=2
-            )
-            self._broadlink.auth()
-            self._state = PowerState.ON
-        except Exception as err:
-            _LOG.error("[%s] Connection verification error: %s", self.log_id, err)
-            self._state = PowerState.OFF
-            self._broadlink = None
-            raise
+
+        # Clean up any existing connection first
+        if self._broadlink:
+            try:
+                _LOG.debug("[%s] Cleaning up existing connection", self.log_id)
+                self._broadlink = None
+            except Exception as err:
+                _LOG.debug(
+                    "[%s] Error cleaning up old connection: %s", self.log_id, err
+                )
+
+        max_retries = 2
+        last_error = None
+
+        for attempt in range(max_retries + 1):
+            try:
+                if attempt > 0:
+                    _LOG.debug(
+                        "[%s] Retry attempt %d/%d",
+                        self.log_id,
+                        attempt,
+                        max_retries,
+                    )
+                    await asyncio.sleep(1)  # Brief delay between retries
+
+                self._broadlink = broadlink.hello(
+                    ip_address=self._device_config.address, timeout=5
+                )
+                self._broadlink.auth()
+                self._state = PowerState.ON
+                break  # Success, exit retry loop
+            except Exception as err:
+                last_error = err
+                _LOG.warning(
+                    "[%s] Connection attempt %d/%d failed: %s",
+                    self.log_id,
+                    attempt + 1,
+                    max_retries + 1,
+                    err,
+                )
+                self._state = PowerState.OFF
+                self._broadlink = None
+
+                if attempt == max_retries:
+                    # Final attempt failed
+                    _LOG.error(
+                        "[%s] Connection verification failed after %d attempts: %s",
+                        self.log_id,
+                        max_retries + 1,
+                        last_error,
+                    )
+                    raise
 
         if self._state == PowerState.ON:
             _LOG.debug("[%s] Device is alive", self.log_id)
@@ -139,9 +182,30 @@ class Broadlink(StatelessHTTPDevice):
                 {MediaAttr.STATE: "OFF"},
             )
 
-    async def send_command(self, predefined_code: str = None, code: str = None) -> str:
+    async def disconnect(self) -> None:
+        """Disconnect from the device and clean up resources."""
+        _LOG.debug("[%s] Disconnecting from device", self.log_id)
+
+        if self._broadlink:
+            try:
+                # Clean up the broadlink connection
+                self._broadlink = None
+            except Exception as err:
+                _LOG.error("[%s] Error during disconnect: %s", self.log_id, err)
+
+        self._state = PowerState.OFF
+
+        # Call parent's disconnect to handle base class cleanup
+        await super().disconnect()
+
+    async def send_command(
+        self, predefined_code: str | None = None, code: str | bytes | None = None
+    ) -> StatusCodes:
         """Send a command to the Broadlink."""
-        await self.connect()
+        # Ensure we have a valid connection
+        if not self._is_connected or not self._broadlink:
+            await self.connect()
+
         self.events.emit(
             EVENTS.UPDATE,
             create_entity_id(EntityTypes.MEDIA_PLAYER, self.identifier),
@@ -150,21 +214,48 @@ class Broadlink(StatelessHTTPDevice):
                 MediaAttr.MEDIA_ARTIST: "",
             },
         )
+
         if predefined_code:
             device, command = predefined_code.split(":")
-            code = self._config_manager.get_code(
+            code_data = self._config_manager.get_code(
                 self.identifier, device.lower(), command.lower()
             )
-            if not code:
+            if not code_data:
                 self.emit(device, command, "Not Found")
                 return StatusCodes.NOT_FOUND
 
             try:
-                decode = b64decode(code)
-                self._broadlink.send_data(decode)
+                decode = b64decode(code_data)
+                if self._broadlink:
+                    self._broadlink.send_data(decode)  # type: ignore[attr-defined]
+                    self.emit(device, command, "Sent")
+                    return StatusCodes.OK
+                return StatusCodes.SERVER_ERROR
+            except (BroadlinkException, OSError) as err:
+                _LOG.warning(
+                    "[%s] Command failed, attempting reconnect: %s",
+                    self.log_id,
+                    err,
+                )
+                # Force reconnection
+                await self.disconnect()
+                await self.connect()
 
-                self.emit(device, command, "Sent")
-                return StatusCodes.OK
+                # Retry once
+                try:
+                    if self._broadlink:
+                        decode = b64decode(code_data)
+                        self._broadlink.send_data(decode)  # type: ignore[attr-defined]
+                        self.emit(device, command, "Sent (after reconnect)")
+                        return StatusCodes.OK
+                except Exception as retry_err:
+                    _LOG.error(
+                        "[%s] Command failed after reconnect: %s",
+                        self.log_id,
+                        retry_err,
+                    )
+                    self.emit(device, command, "Error")
+                    return StatusCodes.SERVER_ERROR
             except Exception as err:  # pylint: disable=broad-exception-caught
                 _LOG.error(
                     "[%s] Error sending command %s: %s",
@@ -172,11 +263,37 @@ class Broadlink(StatelessHTTPDevice):
                     command,
                     err,
                 )
+                self.emit(device, command, "Error")
                 return StatusCodes.BAD_REQUEST
         elif code:
             try:
-                self._broadlink.send_data(code)
-                return StatusCodes.OK
+                if not self._broadlink:
+                    await self.connect()
+                if self._broadlink:
+                    self._broadlink.send_data(code)  # type: ignore[attr-defined]
+                    return StatusCodes.OK
+                return StatusCodes.SERVER_ERROR
+            except (BroadlinkException, OSError) as err:
+                _LOG.warning(
+                    "[%s] Custom command failed, attempting reconnect: %s",
+                    self.log_id,
+                    err,
+                )
+                # Force reconnection and retry
+                await self.disconnect()
+                await self.connect()
+
+                try:
+                    if self._broadlink:
+                        self._broadlink.send_data(code)  # type: ignore[attr-defined]
+                        return StatusCodes.OK
+                except Exception as retry_err:
+                    _LOG.error(
+                        "[%s] Custom command failed after reconnect: %s",
+                        self.log_id,
+                        retry_err,
+                    )
+                    return StatusCodes.SERVER_ERROR
             except Exception as err:  # pylint: disable=broad-exception-caught
                 _LOG.error(
                     "[%s] Error sending custom command: %s",
@@ -185,12 +302,21 @@ class Broadlink(StatelessHTTPDevice):
                 )
                 return StatusCodes.BAD_REQUEST
 
-    async def learn_ir_command(self, input: str) -> None:
+        return StatusCodes.BAD_REQUEST
+
+    async def learn_ir_command(self, input: str) -> StatusCodes:
         """Learn a command."""
         _, mode, device, command = input.split(":")
         self.emit(device, command, "Press the button on the remote...")
+
+        if not self._broadlink:
+            await self.connect()
+
+        if not self._broadlink:
+            return StatusCodes.SERVER_ERROR
+
         try:
-            self._broadlink.enter_learning()
+            self._broadlink.enter_learning()  # type: ignore[attr-defined]
         except (BroadlinkException, OSError) as err:
             _LOG.error("[%s] Error learning command %s: %s", self.log_id, input, err)
             return StatusCodes.SERVER_ERROR
@@ -200,7 +326,7 @@ class Broadlink(StatelessHTTPDevice):
             while (datetime.now(tz=UTC) - start_time) < LEARNING_TIMEOUT:
                 await asyncio.sleep(1)
                 try:
-                    code = self._broadlink.check_data()
+                    code = self._broadlink.check_data()  # type: ignore[attr-defined]
                     if not code:
                         continue
                 except (ReadError, StorageError):
@@ -224,7 +350,7 @@ class Broadlink(StatelessHTTPDevice):
             _LOG.error("[%s] Error learning command %s: %s", self.log_id, input, err)
             return StatusCodes.SERVER_ERROR
 
-    async def learn_rf_command(self, input: str) -> None:
+    async def learn_rf_command(self, input: str) -> StatusCodes:
         """Learn a radiofrequency command."""
         frequency = None
         status = "Learned"
@@ -241,12 +367,18 @@ class Broadlink(StatelessHTTPDevice):
             )
             return StatusCodes.BAD_REQUEST
 
+        if not self._broadlink:
+            await self.connect()
+
+        if not self._broadlink:
+            return StatusCodes.SERVER_ERROR
+
         if not frequency:
             self.emit(device, command, "Hold the button on the remote...")
             await asyncio.sleep(2)
 
             try:
-                self._broadlink.sweep_frequency()
+                self._broadlink.sweep_frequency()  # type: ignore[attr-defined]
 
             except (BroadlinkException, OSError) as err:
                 _LOG.debug("Failed to sweep frequency: %s", err)
@@ -256,11 +388,11 @@ class Broadlink(StatelessHTTPDevice):
                 start_time = datetime.now(tz=UTC)
                 while (datetime.now(tz=UTC) - start_time) < LEARNING_TIMEOUT:
                     await asyncio.sleep(2)
-                    is_found, frequency = self._broadlink.check_frequency()
+                    is_found, frequency = self._broadlink.check_frequency()  # type: ignore[attr-defined]
                     if is_found:
                         _LOG.debug("Radio frequency detected: %s MHz", frequency)
                         self.emit(device, command, f"Found frequency: {frequency} MHz")
-                        self._broadlink.cancel_sweep_frequency()
+                        self._broadlink.cancel_sweep_frequency()  # type: ignore[attr-defined]
                         break
                     else:
                         _LOG.debug("Detecting: %s MHz", frequency)
@@ -268,7 +400,7 @@ class Broadlink(StatelessHTTPDevice):
                             device, command, f"Detecting frequency: {frequency} MHz"
                         )
                 else:
-                    self._broadlink.cancel_sweep_frequency()
+                    self._broadlink.cancel_sweep_frequency()  # type: ignore[attr-defined]
                     self.emit(device, command, "Failed to find frequency")
                     return StatusCodes.TIMEOUT
 
@@ -281,7 +413,7 @@ class Broadlink(StatelessHTTPDevice):
         self.emit(device, command, f"Single press the button: ({frequency} MHz)")
 
         try:
-            self._broadlink.find_rf_packet(frequency=float(frequency))
+            self._broadlink.find_rf_packet(frequency=float(frequency))  # type: ignore[attr-defined]
 
         except (BroadlinkException, OSError) as err:
             _LOG.debug("Failed to enter learning mode: %s", err)
@@ -292,7 +424,7 @@ class Broadlink(StatelessHTTPDevice):
             while (datetime.now(tz=UTC) - start_time) < LEARNING_TIMEOUT:
                 await asyncio.sleep(2)
                 try:
-                    code = self._broadlink.check_data()
+                    code = self._broadlink.check_data()  # type: ignore[attr-defined]
                 except (ReadError, StorageError) as err:
                     _LOG.debug("No RF code received yet, retrying: %s", err)
                     self.emit(
@@ -322,7 +454,7 @@ class Broadlink(StatelessHTTPDevice):
             _LOG.error("[%s] Error learning command %s: %s", self.log_id, input, err)
             return StatusCodes.SERVER_ERROR
 
-    async def remove_command(self, input: str) -> None:
+    async def remove_command(self, input: str) -> StatusCodes:
         """Remove a command."""
         command = ""
         device = input
