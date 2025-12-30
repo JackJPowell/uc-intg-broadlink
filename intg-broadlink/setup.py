@@ -9,6 +9,7 @@ import logging
 from typing import Any
 
 import broadlink
+from broadlink.exceptions import NetworkTimeoutError
 from config_manager import BroadlinkConfig
 from ucapi import (
     IntegrationSetupError,
@@ -74,34 +75,79 @@ class BroadlinkSetupFlow(BaseSetupFlow[BroadlinkConfig]):
 
         _LOG.debug("Connecting to Broadlink device at %s", address)
 
+        device = None
         try:
-            devices = broadlink.discover(discover_ip_address=address, timeout=2)
-            if devices:
-                device = devices[0]
-            else:
-                _LOG.error("No devices found at IP address %s", address)
+            # Try xdiscover first (exits early when device found)
+            _LOG.debug("Attempting xdiscover at %s", address)
+            try:
+                for discovered in broadlink.xdiscover(
+                    discover_ip_address=address, timeout=5
+                ):
+                    _LOG.debug("Device discovered: %s", discovered)
+                    device = discovered
+                    break  # Found a device at the target IP, exit early
+            except NetworkTimeoutError as timeout_err:
+                _LOG.debug("Discovery timed out: %s", timeout_err)
+            except Exception as disc_err:
+                _LOG.debug("Discovery failed: %s", disc_err)
+
+            if not device:
+                # Fallback to hello method
+                _LOG.debug("Discovery returned no device, trying hello method")
+                try:
+                    device = broadlink.hello(ip_address=address, timeout=5)
+                    if device:
+                        _LOG.debug("Device connected via hello: %s", device)
+                except NetworkTimeoutError as timeout_err:
+                    _LOG.warning("Hello timed out for %s: %s", address, timeout_err)
+                except Exception as hello_err:
+                    _LOG.warning("Hello failed for %s: %s", address, hello_err)
+
+            if not device:
+                _LOG.error(
+                    "No devices found at IP address %s (both discovery and hello failed)",
+                    address,
+                )
                 return SetupError(error_type=IntegrationSetupError.NOT_FOUND)
 
             device.auth()
-            device.hello()
+            _LOG.info(
+                "Broadlink device authenticated: %s", device
+            )  # Get device MAC address as identifier
+            identifier = device.mac.hex() if hasattr(device, "mac") else None
+            if not identifier:
+                _LOG.error("Device missing MAC address")
+                return SetupError(error_type=IntegrationSetupError.OTHER)
 
-            _LOG.info("Broadlink device info: %s", devices)
+            # Get device name or use type as fallback
+            device_name = (
+                device.name
+                if hasattr(device, "name") and device.name
+                else f"Broadlink {device.type}"
+            )
 
             # if we are adding a new device: make sure it's not already configured
-            if self._add_mode and self.config.contains(device.mac.hex()):
+            if self._add_mode and self.config.contains(identifier):
                 _LOG.info(
                     "Skipping found device %s: already configured",
-                    device.name,
+                    device_name,
                 )
                 return SetupError(IntegrationSetupError.OTHER)
 
-            return BroadlinkConfig(
-                identifier=device.mac.hex(),
-                name=device.name,
+            # Create config object
+            config = BroadlinkConfig(
+                identifier=identifier,
+                name=device_name,
                 address=address,
                 data={},
             )
 
+            # Clear device reference before returning to avoid any cleanup issues
+            device = None
+
+            _LOG.debug("Returning config for device %s", device_name)
+            return config
+
         except Exception as err:  # pylint: disable=broad-except
-            _LOG.error("Setup Error: %s", err)
+            _LOG.error("Setup Error: %s", err, exc_info=True)
             return SetupError(error_type=IntegrationSetupError.NOT_FOUND)

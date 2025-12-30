@@ -123,10 +123,84 @@ class Broadlink(StatelessHTTPDevice):
                     )
                     await asyncio.sleep(1)  # Brief delay between retries
 
-                self._broadlink = broadlink.hello(
-                    ip_address=self._device_config.address, timeout=5
-                )
-                self._broadlink.auth()
+                # Try connecting to stored IP address
+                try:
+                    self._broadlink = broadlink.hello(
+                        ip_address=self._device_config.address, timeout=5
+                    )
+                    self._broadlink.auth()
+                except Exception as ip_err:
+                    _LOG.warning(
+                        "[%s] Failed to connect to stored IP %s: %s. Trying discovery...",
+                        self.log_id,
+                        self._device_config.address,
+                        ip_err,
+                    )
+                    # Fallback: try to discover device by MAC using xdiscover to exit early
+                    found_device = None
+
+                    for device in broadlink.xdiscover(timeout=5):
+                        if (
+                            hasattr(device, "mac")
+                            and device.mac.hex() == self.identifier
+                        ):
+                            _LOG.debug(
+                                "[%s] Found device with matching MAC: %s",
+                                self.log_id,
+                                device,
+                            )
+                            found_device = device
+                            break  # Found our device, exit early
+
+                    if not found_device:
+                        raise Exception(
+                            f"Device with MAC {self.identifier} not found on network"
+                        )
+
+                    # Connect to discovered device
+                    self._broadlink = found_device
+                    self._broadlink.auth()
+
+                    # Update IP address if it changed
+                    if hasattr(self._broadlink, "host") and self._broadlink.host:
+                        new_ip = self._broadlink.host[0]
+                        if new_ip != self._device_config.address:
+                            _LOG.info(
+                                "[%s] Device discovered at new IP address %s (was %s), updating config",
+                                self.log_id,
+                                new_ip,
+                                self._device_config.address,
+                            )
+                            self.update_config(address=new_ip)
+
+                # Verify we connected to the correct device by checking MAC address
+                if hasattr(self._broadlink, "mac") and self._broadlink.mac:
+                    connected_mac = self._broadlink.mac.hex()
+                    if connected_mac != self.identifier:
+                        _LOG.error(
+                            "[%s] MAC address mismatch! Expected %s, got %s",
+                            self.log_id,
+                            self.identifier,
+                            connected_mac,
+                        )
+                        self._broadlink = None
+                        raise ValueError(
+                            f"MAC address mismatch: expected {self.identifier}, got {connected_mac}"
+                        )
+
+                    # Check if IP address has changed
+                    if hasattr(self._broadlink, "host") and self._broadlink.host:
+                        current_ip = self._broadlink.host[0]
+                        if current_ip != self._device_config.address:
+                            _LOG.warning(
+                                "[%s] Device IP address changed from %s to %s, updating config",
+                                self.log_id,
+                                self._device_config.address,
+                                current_ip,
+                            )
+                            # Update the config with the new IP address
+                            self.update_config(address=current_ip)
+
                 self._state = PowerState.ON
                 break  # Success, exit retry loop
             except Exception as err:

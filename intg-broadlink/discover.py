@@ -35,9 +35,23 @@ class BroadlinkDiscovery(BaseDiscovery):
         :param device: The device to parse
         :return: DiscoveredDevice or None if parsing fails
         """
-        return DiscoveredDevice(
-            identifier=device.host[0],
-            name=device.name,
-            address=device.host[0],
-            extra_data={},
-        )
+        try:
+            # Use MAC address as unique identifier
+            identifier = device.mac.hex() if hasattr(device, 'mac') else device.host[0]
+            # Fallback to device type if name is not available
+            name = device.name if hasattr(device, 'name') and device.name else f"Broadlink {device.type}"
+            address = device.host[0] if hasattr(device, 'host') else None
+            
+            if not address:
+                _LOG.warning("Device missing IP address, skipping")
+                return None
+                
+            return DiscoveredDevice(
+                identifier=identifier,
+                name=name,
+                address=address,
+                extra_data={},
+            )
+        except Exception as err:
+            _LOG.error("Error parsing device: %s", err)
+            return None
