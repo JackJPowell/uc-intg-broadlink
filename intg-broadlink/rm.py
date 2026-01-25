@@ -8,14 +8,14 @@ import logging
 from asyncio import AbstractEventLoop
 from base64 import b64decode, b64encode
 from datetime import UTC, datetime, timedelta
-from enum import StrEnum
 
 import broadlink
 from broadlink.exceptions import BroadlinkException, ReadError, StorageError
 from ucapi import EntityTypes, StatusCodes
 from ucapi.media_player import Attributes as MediaAttr
-from ucapi_framework import create_entity_id
-from ucapi_framework.device import StatelessHTTPDevice, DeviceEvents as EVENTS
+from ucapi.media_player import States as PowerState
+from ucapi_framework import create_entity_id, BaseIntegrationDriver
+from ucapi_framework.device import ExternalClientDevice, DeviceEvents as EVENTS
 
 from config_manager import BroadlinkConfig, BroadlinkConfigManager
 
@@ -24,15 +24,7 @@ _LOG = logging.getLogger(__name__)
 LEARNING_TIMEOUT = timedelta(seconds=30)
 
 
-class PowerState(StrEnum):
-    """Playback state for companion protocol."""
-
-    OFF = "OFF"
-    ON = "ON"
-    STANDBY = "STANDBY"
-
-
-class Broadlink(StatelessHTTPDevice):
+class Broadlink(ExternalClientDevice):
     """Representing a Broadlink Device."""
 
     def __init__(
@@ -40,12 +32,18 @@ class Broadlink(StatelessHTTPDevice):
         device_config: BroadlinkConfig,
         loop: AbstractEventLoop | None = None,
         config_manager: BroadlinkConfigManager | None = None,
+        driver: BaseIntegrationDriver | None = None,
     ) -> None:
         """Create instance."""
-        super().__init__(device_config, loop, config_manager)
+        super().__init__(
+            device_config,
+            loop,
+            enable_watchdog=False,  # Broadlink doesn't need watchdog
+            config_manager=config_manager,
+            driver=driver,
+        )
         self._device_config: BroadlinkConfig
         self._config_manager: BroadlinkConfigManager  # Type narrowing from base class
-        self._broadlink: broadlink.Device | None = None
         self._state: PowerState = PowerState.OFF
         self._source_list: list[str] = []
         self._source: str | None = None
@@ -91,193 +89,126 @@ class Broadlink(StatelessHTTPDevice):
         """Return the device source list."""
         return self._source_list
 
-    async def verify_connection(self) -> None:
-        """Verify the device connection by discovering and authenticating."""
+    async def create_client(self) -> broadlink.Device:
+        """Create and discover the Broadlink client."""
         _LOG.debug(
-            "[%s] Verifying connection to device at IP address: %s",
+            "[%s] Creating Broadlink client at IP: %s",
             self.log_id,
             self.address,
         )
 
-        # Clean up any existing connection first
-        if self._broadlink:
-            try:
-                _LOG.debug("[%s] Cleaning up existing connection", self.log_id)
-                self._broadlink = None
-            except Exception as err:
+        # Try connecting to stored IP address first
+        try:
+            device = broadlink.hello(ip_address=self._device_config.address, timeout=5)
+            if device:
+                return device
+        except Exception as ip_err:
+            _LOG.warning(
+                "[%s] Failed to connect to stored IP %s: %s. Trying discovery...",
+                self.log_id,
+                self._device_config.address,
+                ip_err,
+            )
+
+        # Fallback: try to discover device by MAC using xdiscover to exit early
+        for device in broadlink.xdiscover(timeout=5):
+            if hasattr(device, "mac") and device.mac.hex() == self.identifier:
                 _LOG.debug(
-                    "[%s] Error cleaning up old connection: %s", self.log_id, err
+                    "[%s] Found device with matching MAC: %s",
+                    self.log_id,
+                    device,
+                )
+                # Update IP address if it changed
+                if hasattr(device, "host") and device.host:
+                    new_ip = device.host[0]
+                    if new_ip != self._device_config.address:
+                        _LOG.info(
+                            "[%s] Device discovered at new IP address %s (was %s), updating config",
+                            self.log_id,
+                            new_ip,
+                            self._device_config.address,
+                        )
+                        self.update_config(address=new_ip)
+                return device
+
+        raise Exception(f"Device with MAC {self.identifier} not found on network")
+
+    async def connect_client(self) -> None:
+        """Authenticate with the Broadlink device."""
+        if not self._client:
+            raise Exception("Client not created")
+
+        _LOG.debug("[%s] Authenticating with Broadlink device", self.log_id)
+        self._client.auth()  # type: ignore[attr-defined]
+
+        # Verify we connected to the correct device by checking MAC address
+        if hasattr(self._client, "mac") and self._client.mac:
+            connected_mac = self._client.mac.hex()
+            if connected_mac != self.identifier:
+                _LOG.error(
+                    "[%s] MAC address mismatch! Expected %s, got %s",
+                    self.log_id,
+                    self.identifier,
+                    connected_mac,
+                )
+                raise ValueError(
+                    f"MAC address mismatch: expected {self.identifier}, got {connected_mac}"
                 )
 
-        max_retries = 2
-        last_error = None
-
-        for attempt in range(max_retries + 1):
-            try:
-                if attempt > 0:
-                    _LOG.debug(
-                        "[%s] Retry attempt %d/%d",
-                        self.log_id,
-                        attempt,
-                        max_retries,
-                    )
-                    await asyncio.sleep(1)  # Brief delay between retries
-
-                # Try connecting to stored IP address
-                try:
-                    self._broadlink = broadlink.hello(
-                        ip_address=self._device_config.address, timeout=5
-                    )
-                    self._broadlink.auth()
-                except Exception as ip_err:
+            # Check if IP address has changed
+            if hasattr(self._client, "host") and self._client.host:
+                current_ip = self._client.host[0]
+                if current_ip != self._device_config.address:
                     _LOG.warning(
-                        "[%s] Failed to connect to stored IP %s: %s. Trying discovery...",
+                        "[%s] Device IP address changed from %s to %s, updating config",
                         self.log_id,
                         self._device_config.address,
-                        ip_err,
+                        current_ip,
                     )
-                    # Fallback: try to discover device by MAC using xdiscover to exit early
-                    found_device = None
+                    self.update_config(address=current_ip)
 
-                    for device in broadlink.xdiscover(timeout=5):
-                        if (
-                            hasattr(device, "mac")
-                            and device.mac.hex() == self.identifier
-                        ):
-                            _LOG.debug(
-                                "[%s] Found device with matching MAC: %s",
-                                self.log_id,
-                                device,
-                            )
-                            found_device = device
-                            break  # Found our device, exit early
+        self._state = PowerState.ON
+        _LOG.debug("[%s] Device authenticated and ready", self.log_id)
+        self.reload_sources()
+        self.events.emit(
+            EVENTS.UPDATE,
+            create_entity_id(EntityTypes.MEDIA_PLAYER, self.identifier),
+            {
+                MediaAttr.STATE: self.state,
+                MediaAttr.SOURCE_LIST: self.source_list,
+                MediaAttr.MEDIA_TITLE: "",
+                MediaAttr.MEDIA_ARTIST: "",
+            },
+        )
+        self.events.emit(
+            EVENTS.UPDATE,
+            create_entity_id(EntityTypes.REMOTE, self.identifier),
+            {MediaAttr.STATE: "ON"},
+        )
+        self.events.emit(
+            EVENTS.UPDATE,
+            create_entity_id(EntityTypes.IR_EMITTER, self.identifier),
+            {MediaAttr.STATE: "ON"},
+        )
 
-                    if not found_device:
-                        raise Exception(
-                            f"Device with MAC {self.identifier} not found on network"
-                        )
-
-                    # Connect to discovered device
-                    self._broadlink = found_device
-                    self._broadlink.auth()
-
-                    # Update IP address if it changed
-                    if hasattr(self._broadlink, "host") and self._broadlink.host:
-                        new_ip = self._broadlink.host[0]
-                        if new_ip != self._device_config.address:
-                            _LOG.info(
-                                "[%s] Device discovered at new IP address %s (was %s), updating config",
-                                self.log_id,
-                                new_ip,
-                                self._device_config.address,
-                            )
-                            self.update_config(address=new_ip)
-
-                # Verify we connected to the correct device by checking MAC address
-                if hasattr(self._broadlink, "mac") and self._broadlink.mac:
-                    connected_mac = self._broadlink.mac.hex()
-                    if connected_mac != self.identifier:
-                        _LOG.error(
-                            "[%s] MAC address mismatch! Expected %s, got %s",
-                            self.log_id,
-                            self.identifier,
-                            connected_mac,
-                        )
-                        self._broadlink = None
-                        raise ValueError(
-                            f"MAC address mismatch: expected {self.identifier}, got {connected_mac}"
-                        )
-
-                    # Check if IP address has changed
-                    if hasattr(self._broadlink, "host") and self._broadlink.host:
-                        current_ip = self._broadlink.host[0]
-                        if current_ip != self._device_config.address:
-                            _LOG.warning(
-                                "[%s] Device IP address changed from %s to %s, updating config",
-                                self.log_id,
-                                self._device_config.address,
-                                current_ip,
-                            )
-                            # Update the config with the new IP address
-                            self.update_config(address=current_ip)
-
-                self._state = PowerState.ON
-                break  # Success, exit retry loop
-            except Exception as err:
-                last_error = err
-                _LOG.warning(
-                    "[%s] Connection attempt %d/%d failed: %s",
-                    self.log_id,
-                    attempt + 1,
-                    max_retries + 1,
-                    err,
-                )
-                self._state = PowerState.OFF
-                self._broadlink = None
-
-                if attempt == max_retries:
-                    # Final attempt failed
-                    _LOG.error(
-                        "[%s] Connection verification failed after %d attempts: %s",
-                        self.log_id,
-                        max_retries + 1,
-                        last_error,
-                    )
-                    raise
-
-        if self._state == PowerState.ON:
-            _LOG.debug("[%s] Device is alive", self.log_id)
-            self.reload_sources()
-            self.events.emit(
-                EVENTS.UPDATE,
-                create_entity_id(EntityTypes.MEDIA_PLAYER, self.identifier),
-                {
-                    MediaAttr.STATE: self.state,
-                    MediaAttr.SOURCE_LIST: self.source_list,
-                    MediaAttr.MEDIA_TITLE: "",
-                    MediaAttr.MEDIA_ARTIST: "",
-                },
-            )
-            self.events.emit(
-                EVENTS.UPDATE,
-                create_entity_id(EntityTypes.REMOTE, self.identifier),
-                {MediaAttr.STATE: "ON"},
-            )
-            self.events.emit(
-                EVENTS.UPDATE,
-                create_entity_id(EntityTypes.IR_EMITTER, self.identifier),
-                {MediaAttr.STATE: "ON"},
-            )
-        else:
-            _LOG.debug("[%s] Device is not alive", self.log_id)
-            self.events.emit(
-                EVENTS.UPDATE,
-                create_entity_id(EntityTypes.MEDIA_PLAYER, self.identifier),
-                {MediaAttr.STATE: "OFF"},
-            )
-
-    async def disconnect(self) -> None:
-        """Disconnect from the device and clean up resources."""
-        _LOG.debug("[%s] Disconnecting from device", self.log_id)
-
-        if self._broadlink:
-            try:
-                # Clean up the broadlink connection
-                self._broadlink = None
-            except Exception as err:
-                _LOG.error("[%s] Error during disconnect: %s", self.log_id, err)
-
+    async def disconnect_client(self) -> None:
+        """Disconnect from the Broadlink device."""
+        _LOG.debug("[%s] Disconnecting from Broadlink device", self.log_id)
         self._state = PowerState.OFF
+        # Broadlink doesn't have an explicit disconnect method
+        # The client object will be cleaned up by the parent class
 
-        # Call parent's disconnect to handle base class cleanup
-        await super().disconnect()
+    def check_client_connected(self) -> bool:
+        """Check if the Broadlink client is connected."""
+        # Broadlink is stateless, so we just check if client exists and state is ON
+        return self._client is not None and self._state == PowerState.ON
 
     async def send_command(
         self, predefined_code: str | None = None, code: str | bytes | None = None
     ) -> StatusCodes:
         """Send a command to the Broadlink."""
         # Ensure we have a valid connection
-        if not self._is_connected or not self._broadlink:
+        if not self.is_connected or not self._client:
             await self.connect()
 
         self.events.emit(
@@ -300,8 +231,8 @@ class Broadlink(StatelessHTTPDevice):
 
             try:
                 decode = b64decode(code_data)
-                if self._broadlink:
-                    self._broadlink.send_data(decode)  # type: ignore[attr-defined]
+                if self._client:
+                    self._client.send_data(decode)  # type: ignore[attr-defined]
                     self.emit(device, command, "Sent")
                     return StatusCodes.OK
                 return StatusCodes.SERVER_ERROR
@@ -317,9 +248,9 @@ class Broadlink(StatelessHTTPDevice):
 
                 # Retry once
                 try:
-                    if self._broadlink:
+                    if self._client:
                         decode = b64decode(code_data)
-                        self._broadlink.send_data(decode)  # type: ignore[attr-defined]
+                        self._client.send_data(decode)  # type: ignore[attr-defined]
                         self.emit(device, command, "Sent (after reconnect)")
                         return StatusCodes.OK
                 except Exception as retry_err:
@@ -341,10 +272,10 @@ class Broadlink(StatelessHTTPDevice):
                 return StatusCodes.BAD_REQUEST
         elif code:
             try:
-                if not self._broadlink:
+                if not self._client:
                     await self.connect()
-                if self._broadlink:
-                    self._broadlink.send_data(code)  # type: ignore[attr-defined]
+                if self._client:
+                    self._client.send_data(code)  # type: ignore[attr-defined]
                     return StatusCodes.OK
                 return StatusCodes.SERVER_ERROR
             except (BroadlinkException, OSError) as err:
@@ -358,8 +289,8 @@ class Broadlink(StatelessHTTPDevice):
                 await self.connect()
 
                 try:
-                    if self._broadlink:
-                        self._broadlink.send_data(code)  # type: ignore[attr-defined]
+                    if self._client:
+                        self._client.send_data(code)  # type: ignore[attr-defined]
                         return StatusCodes.OK
                 except Exception as retry_err:
                     _LOG.error(
@@ -383,14 +314,14 @@ class Broadlink(StatelessHTTPDevice):
         _, mode, device, command = input.split(":")
         self.emit(device, command, "Press the button on the remote...")
 
-        if not self._broadlink:
+        if not self._client:
             await self.connect()
 
-        if not self._broadlink:
+        if not self._client:
             return StatusCodes.SERVER_ERROR
 
         try:
-            self._broadlink.enter_learning()  # type: ignore[attr-defined]
+            self._client.enter_learning()  # type: ignore[attr-defined]
         except (BroadlinkException, OSError) as err:
             _LOG.error("[%s] Error learning command %s: %s", self.log_id, input, err)
             return StatusCodes.SERVER_ERROR
@@ -400,7 +331,7 @@ class Broadlink(StatelessHTTPDevice):
             while (datetime.now(tz=UTC) - start_time) < LEARNING_TIMEOUT:
                 await asyncio.sleep(1)
                 try:
-                    code = self._broadlink.check_data()  # type: ignore[attr-defined]
+                    code = self._client.check_data()  # type: ignore[attr-defined]
                     if not code:
                         continue
                 except (ReadError, StorageError):
@@ -441,10 +372,10 @@ class Broadlink(StatelessHTTPDevice):
             )
             return StatusCodes.BAD_REQUEST
 
-        if not self._broadlink:
+        if not self._client:
             await self.connect()
 
-        if not self._broadlink:
+        if not self._client:
             return StatusCodes.SERVER_ERROR
 
         if not frequency:
@@ -452,7 +383,7 @@ class Broadlink(StatelessHTTPDevice):
             await asyncio.sleep(2)
 
             try:
-                self._broadlink.sweep_frequency()  # type: ignore[attr-defined]
+                self._client.sweep_frequency()  # type: ignore[attr-defined]
 
             except (BroadlinkException, OSError) as err:
                 _LOG.debug("Failed to sweep frequency: %s", err)
@@ -462,11 +393,11 @@ class Broadlink(StatelessHTTPDevice):
                 start_time = datetime.now(tz=UTC)
                 while (datetime.now(tz=UTC) - start_time) < LEARNING_TIMEOUT:
                     await asyncio.sleep(2)
-                    is_found, frequency = self._broadlink.check_frequency()  # type: ignore[attr-defined]
+                    is_found, frequency = self._client.check_frequency()  # type: ignore[attr-defined]
                     if is_found:
                         _LOG.debug("Radio frequency detected: %s MHz", frequency)
                         self.emit(device, command, f"Found frequency: {frequency} MHz")
-                        self._broadlink.cancel_sweep_frequency()  # type: ignore[attr-defined]
+                        self._client.cancel_sweep_frequency()  # type: ignore[attr-defined]
                         break
                     else:
                         _LOG.debug("Detecting: %s MHz", frequency)
@@ -474,7 +405,7 @@ class Broadlink(StatelessHTTPDevice):
                             device, command, f"Detecting frequency: {frequency} MHz"
                         )
                 else:
-                    self._broadlink.cancel_sweep_frequency()  # type: ignore[attr-defined]
+                    self._client.cancel_sweep_frequency()  # type: ignore[attr-defined]
                     self.emit(device, command, "Failed to find frequency")
                     return StatusCodes.TIMEOUT
 
@@ -487,7 +418,7 @@ class Broadlink(StatelessHTTPDevice):
         self.emit(device, command, f"Single press the button: ({frequency} MHz)")
 
         try:
-            self._broadlink.find_rf_packet(frequency=float(frequency))  # type: ignore[attr-defined]
+            self._client.find_rf_packet(frequency=float(frequency))  # type: ignore[attr-defined]
 
         except (BroadlinkException, OSError) as err:
             _LOG.debug("Failed to enter learning mode: %s", err)
@@ -498,7 +429,7 @@ class Broadlink(StatelessHTTPDevice):
             while (datetime.now(tz=UTC) - start_time) < LEARNING_TIMEOUT:
                 await asyncio.sleep(2)
                 try:
-                    code = self._broadlink.check_data()  # type: ignore[attr-defined]
+                    code = self._client.check_data()  # type: ignore[attr-defined]
                 except (ReadError, StorageError) as err:
                     _LOG.debug("No RF code received yet, retrying: %s", err)
                     self.emit(
