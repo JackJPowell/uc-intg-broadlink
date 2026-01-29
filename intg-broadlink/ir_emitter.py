@@ -10,11 +10,11 @@ from typing import Any
 from rm import Broadlink
 from config_manager import BroadlinkConfig
 from ir_converter import convert_to_broadlink
-from ucapi import Entity, EntityTypes, StatusCodes
+from ucapi import EntityTypes, StatusCodes, Entity
 from ucapi.media_player import States as MediaStates
 from ucapi.remote import Attributes, Commands
 from ucapi.remote import States as RemoteStates
-from ucapi_framework import create_entity_id
+from ucapi_framework import create_entity_id, Entity as FrameworkEntity
 
 _LOG = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ BROADLINK_REMOTE_STATE_MAPPING = {
 }
 
 
-class BroadlinkIREmitter(Entity):
+class BroadlinkIREmitter(Entity, FrameworkEntity):
     """Representation of a Broadlink IR Emitter entity."""
 
     def __init__(self, config_device: BroadlinkConfig, device: Broadlink):
@@ -36,13 +36,14 @@ class BroadlinkIREmitter(Entity):
         self._device = device
         _LOG.debug("Broadlink IR Emitter init")
         features = ["send_ir"]
+        self._entity_id: str = create_entity_id("ir_emitter", config_device.identifier)
         super().__init__(
-            create_entity_id("ir_emitter", config_device.identifier),
+            self._entity_id,
             f"{config_device.name} IR Emitter",
             EntityTypes.IR_EMITTER,
             features,
             attributes={
-                Attributes.STATE: device.state,
+                Attributes.STATE: "UNKNOWN",
             },
             options={
                 "ir_formats": ["PRONTO", "HEX"],
@@ -64,10 +65,10 @@ class BroadlinkIREmitter(Entity):
 
     async def command_handler(
         self,
-        entity: Entity,
+        _entity: Entity,
         cmd_id: str,
         params: dict[str, Any] | None = None,
-        options: Any | None = None,
+        _options: Any | None = None,
     ) -> StatusCodes:
         """
         Remote entity command handler.
@@ -81,17 +82,24 @@ class BroadlinkIREmitter(Entity):
         :return: status code of the command request
         """
         repeat = 1
-        _LOG.info("Got %s command request: %s %s", self.id, cmd_id, params)
+        _LOG.info("Got %s command request: %s %s", self._entity_id, cmd_id, params)
 
         if self._device is None:
-            _LOG.warning("No Broadlink instance for entity: %s", self.id)
+            _LOG.warning("No Broadlink instance for entity: %s", self._entity_id)
             return StatusCodes.SERVICE_UNAVAILABLE
 
         if params:
             repeat = self.get_int_param("repeat", params, 1)
 
-        for _i in range(0, repeat):
-            await self.handle_command(cmd_id, params)
+        try:
+            for _i in range(0, repeat):
+                await self.handle_command(cmd_id, params)
+
+            # Update entity with latest device attributes
+            self.update(self._device.get_device_attributes(self._entity_id))
+        except Exception as ex:  # pylint: disable=broad-except
+            _LOG.error("Error executing command %s: %s", cmd_id, ex)
+            return StatusCodes.BAD_REQUEST
         return StatusCodes.OK
 
     async def handle_command(
@@ -110,8 +118,8 @@ class BroadlinkIREmitter(Entity):
             code_param = params.get("code") if params else None
             if code_param:
                 code = convert_to_broadlink(code_param)
-                await self._device.send_command(code=code)
-            return StatusCodes.OK
+                return await self._device.send_command(code=code)
+            return StatusCodes.BAD_REQUEST
 
         if cmd_id == "stop_ir":
             # Ignore stop command as Broadlink does not support it

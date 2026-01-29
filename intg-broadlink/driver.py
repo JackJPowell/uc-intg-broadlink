@@ -33,7 +33,13 @@ async def main():
 
     driver = BaseIntegrationDriver(
         device_class=Broadlink,
-        entity_classes=[BroadlinkMediaPlayer, BroadlinkRemote, BroadlinkIREmitter],
+        entity_classes=[
+            BroadlinkMediaPlayer,
+            BroadlinkRemote,
+            lambda cfg, dev: BroadlinkIREmitter(cfg, dev),
+        ],
+        driver_id="broadlink_driver",
+        require_connection_before_registry=True,
     )
     driver.config_manager = BroadlinkConfigManager(
         get_config_path(driver.api.config_dir_path),
@@ -42,7 +48,7 @@ async def main():
         config_class=BroadlinkConfig,
     )
 
-    await driver.register_all_configured_devices()
+    await driver.register_all_device_instances()
 
     discovery = BroadlinkDiscovery(timeout=1)
     setup_handler = BroadlinkSetupFlow.create_handler(driver, discovery=discovery)

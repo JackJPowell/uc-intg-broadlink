@@ -12,7 +12,7 @@ import ucapi
 from config_manager import BroadlinkConfig
 from ucapi import EntityTypes, MediaPlayer, media_player
 from ucapi.media_player import Attributes, DeviceClasses
-from ucapi_framework import create_entity_id
+from ucapi_framework import create_entity_id, Entity
 
 _LOG = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ features = [
 ]
 
 
-class BroadlinkMediaPlayer(MediaPlayer):
+class BroadlinkMediaPlayer(MediaPlayer, Entity):
     """Representation of a Broadlink MediaPlayer entity."""
 
     def __init__(self, config_device: BroadlinkConfig, device: rm.Broadlink):
@@ -35,9 +35,9 @@ class BroadlinkMediaPlayer(MediaPlayer):
             config_device.name,
             features,
             attributes={
-                Attributes.STATE: device.state,
-                Attributes.SOURCE: device.source if device.source else "",
-                Attributes.SOURCE_LIST: device.source_list,
+                Attributes.STATE: "UNKNOWN",
+                Attributes.SOURCE: "",
+                Attributes.SOURCE_LIST: [],
             },
             device_class=DeviceClasses.RECEIVER,
             options={media_player.Options.SIMPLE_COMMANDS: self.options},
@@ -46,7 +46,11 @@ class BroadlinkMediaPlayer(MediaPlayer):
 
     # pylint: disable=too-many-statements
     async def media_player_cmd_handler(
-        self, entity: MediaPlayer, cmd_id: str, params: dict[str, Any] | None = None, options: Any | None = None
+        self,
+        entity: MediaPlayer,
+        cmd_id: str,
+        params: dict[str, Any] | None = None,
+        options: Any | None = None,
     ) -> ucapi.StatusCodes:
         """
         Media-player entity command handler.
@@ -72,6 +76,9 @@ class BroadlinkMediaPlayer(MediaPlayer):
                 case media_player.Commands.SELECT_SOUND_MODE:
                     pass
                 # --- simple commands ---
+
+            # Update entity with latest device attributes
+            self.update(self._device.get_device_attributes(entity.id))
 
         except Exception as ex:  # pylint: disable=broad-except
             _LOG.error("Error executing command %s: %s", cmd_id, ex)

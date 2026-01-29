@@ -21,35 +21,6 @@ from ucapi_framework import BaseSetupFlow
 _LOG = logging.getLogger(__name__)
 
 
-_MANUAL_INPUT_SCHEMA = RequestUserInput(
-    {"en": "Broadlink Setup"},
-    [
-        {
-            "id": "info",
-            "label": {
-                "en": "Setup Information",
-            },
-            "field": {
-                "label": {
-                    "value": {
-                        "en": (
-                            "Please supply the following settings for your Broadlink device."
-                        ),
-                    }
-                }
-            },
-        },
-        {
-            "field": {"text": {"value": ""}},
-            "id": "address",
-            "label": {
-                "en": "IP Address",
-            },
-        },
-    ],
-)
-
-
 class BroadlinkSetupFlow(BaseSetupFlow[BroadlinkConfig]):
     """
     Setup flow for Broadlink integration.
@@ -63,7 +34,33 @@ class BroadlinkSetupFlow(BaseSetupFlow[BroadlinkConfig]):
 
         :return: RequestUserInput with form fields for manual configuration
         """
-        return _MANUAL_INPUT_SCHEMA
+        return RequestUserInput(
+            {"en": "Broadlink Setup"},
+            [
+                {
+                    "id": "info",
+                    "label": {
+                        "en": "Setup Information",
+                    },
+                    "field": {
+                        "label": {
+                            "value": {
+                                "en": (
+                                    "Please supply the following settings for your Broadlink device."
+                                ),
+                            }
+                        }
+                    },
+                },
+                {
+                    "field": {"text": {"value": ""}},
+                    "id": "address",
+                    "label": {
+                        "en": "IP Address",
+                    },
+                },
+            ],
+        )
 
     async def query_device(
         self, input_values: dict[str, Any]
@@ -71,7 +68,7 @@ class BroadlinkSetupFlow(BaseSetupFlow[BroadlinkConfig]):
         address = input_values["address"]
 
         if address is None or address == "":
-            return _MANUAL_INPUT_SCHEMA
+            return self.get_manual_entry_form()
 
         _LOG.debug("Connecting to Broadlink device at %s", address)
 

@@ -13,7 +13,7 @@ from ucapi import EntityTypes, Remote, StatusCodes
 from ucapi.media_player import States as MediaStates
 from ucapi.remote import Attributes, Commands, Features
 from ucapi.remote import States as RemoteStates
-from ucapi_framework import create_entity_id
+from ucapi_framework import create_entity_id, Entity
 
 _LOG = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ BROADLINK_REMOTE_STATE_MAPPING = {
 }
 
 
-class BroadlinkRemote(Remote):
+class BroadlinkRemote(Remote, Entity):
     """Representation of a Broadlink Remote entity."""
 
     def __init__(self, config_device: BroadlinkConfig, device: Broadlink):
@@ -40,7 +40,7 @@ class BroadlinkRemote(Remote):
             f"{config_device.name} Remote",
             features,
             attributes={
-                Attributes.STATE: device.state,
+                Attributes.STATE: "UNKNOWN",
             },
             cmd_handler=self.command_handler,
         )

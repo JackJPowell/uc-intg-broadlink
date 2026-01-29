@@ -12,10 +12,14 @@ from datetime import UTC, datetime, timedelta
 import broadlink
 from broadlink.exceptions import BroadlinkException, ReadError, StorageError
 from ucapi import EntityTypes, StatusCodes
-from ucapi.media_player import Attributes as MediaAttr
 from ucapi.media_player import States as PowerState
-from ucapi_framework import create_entity_id, BaseIntegrationDriver
-from ucapi_framework.device import ExternalClientDevice, DeviceEvents as EVENTS
+from ucapi.remote import Attributes as RemoteAttributes
+from ucapi_framework import (
+    BaseIntegrationDriver,
+    MediaPlayerAttributes,
+    create_entity_id,
+)
+from ucapi_framework.device import ExternalClientDevice
 
 from config_manager import BroadlinkConfig, BroadlinkConfigManager
 
@@ -44,9 +48,13 @@ class Broadlink(ExternalClientDevice):
         )
         self._device_config: BroadlinkConfig
         self._config_manager: BroadlinkConfigManager  # Type narrowing from base class
-        self._state: PowerState = PowerState.OFF
-        self._source_list: list[str] = []
-        self._source: str | None = None
+        self.attributes = MediaPlayerAttributes(
+            STATE=PowerState.OFF,
+            SOURCE=None,
+            SOURCE_LIST=[],
+            MEDIA_TITLE="",
+            MEDIA_ARTIST="",
+        )
 
     @property
     def identifier(self) -> str:
@@ -70,24 +78,23 @@ class Broadlink(ExternalClientDevice):
         return self._device_config.name
 
     @property
-    def address(self) -> str | None:
-        """Return the optional device address."""
+    def address(self) -> str:
+        """Return the device IP address."""
         return self._device_config.address
 
-    @property
-    def state(self) -> str:
-        """Return the device state."""
-        return self._state.upper()
+    def get_device_attributes(self, entity_id: str) -> MediaPlayerAttributes | dict:
+        """
+        Provide entity-specific attributes for the given entity.
 
-    @property
-    def source(self) -> str | None:
-        """Return the device source."""
-        return self._source
+        :param entity_id: Entity identifier to get attributes for
+        :return: MediaPlayerAttributes instance or dict with STATE only for remote/ir_emitter
+        """
+        # Remote and IR Emitter entities only need STATE
+        if entity_id.startswith("remote.") or entity_id.startswith("ir_emitter."):
+            return {RemoteAttributes.STATE: self.attributes.STATE}
 
-    @property
-    def source_list(self) -> list[str]:
-        """Return the device source list."""
-        return self._source_list
+        # Media player gets full attributes
+        return self.attributes
 
     async def create_client(self) -> broadlink.Device:
         """Create and discover the Broadlink client."""
@@ -167,58 +174,54 @@ class Broadlink(ExternalClientDevice):
                     )
                     self.update_config(address=current_ip)
 
-        self._state = PowerState.ON
+        self.attributes.STATE = PowerState.ON
         _LOG.debug("[%s] Device authenticated and ready", self.log_id)
         self.reload_sources()
-        self.events.emit(
-            EVENTS.UPDATE,
-            create_entity_id(EntityTypes.MEDIA_PLAYER, self.identifier),
-            {
-                MediaAttr.STATE: self.state,
-                MediaAttr.SOURCE_LIST: self.source_list,
-                MediaAttr.MEDIA_TITLE: "",
-                MediaAttr.MEDIA_ARTIST: "",
-            },
-        )
-        self.events.emit(
-            EVENTS.UPDATE,
-            create_entity_id(EntityTypes.REMOTE, self.identifier),
-            {MediaAttr.STATE: "ON"},
-        )
-        self.events.emit(
-            EVENTS.UPDATE,
-            create_entity_id(EntityTypes.IR_EMITTER, self.identifier),
-            {MediaAttr.STATE: "ON"},
-        )
 
     async def disconnect_client(self) -> None:
         """Disconnect from the Broadlink device."""
         _LOG.debug("[%s] Disconnecting from Broadlink device", self.log_id)
-        self._state = PowerState.OFF
+        self.attributes.STATE = PowerState.OFF
         # Broadlink doesn't have an explicit disconnect method
         # The client object will be cleaned up by the parent class
 
     def check_client_connected(self) -> bool:
         """Check if the Broadlink client is connected."""
-        # Broadlink is stateless, so we just check if client exists and state is ON
-        return self._client is not None and self._state == PowerState.ON
+        # Check if client exists
+        if self._client is None:
+            return False
+
+        # Check if state is ON
+        if self.attributes.STATE != PowerState.ON:
+            return False
+
+        # Verify client has been authenticated by checking for MAC address
+        # (auth() populates the MAC address)
+        if not hasattr(self._client, "mac") or self._client.mac is None:
+            _LOG.debug("[%s] Client exists but not authenticated (no MAC)", self.log_id)
+            return False
+
+        return True
 
     async def send_command(
         self, predefined_code: str | None = None, code: str | bytes | None = None
     ) -> StatusCodes:
         """Send a command to the Broadlink."""
-        # Ensure we have a valid connection
+        # Check if connected - don't force connection here
         if not self.is_connected or not self._client:
-            await self.connect()
+            _LOG.warning("[%s] Cannot send command: device not connected", self.log_id)
+            return StatusCodes.SERVICE_UNAVAILABLE
 
-        self.events.emit(
-            EVENTS.UPDATE,
-            create_entity_id(EntityTypes.MEDIA_PLAYER, self.identifier),
-            {
-                MediaAttr.MEDIA_TITLE: "",
-                MediaAttr.MEDIA_ARTIST: "",
-            },
-        )
+        # Clear media title/artist
+        self.attributes.MEDIA_TITLE = ""
+        self.attributes.MEDIA_ARTIST = ""
+
+        # Update media player entity with cleared values
+        if self._driver:
+            entity_id = create_entity_id(EntityTypes.MEDIA_PLAYER, self.identifier)
+            entity = self._driver.get_entity_by_id(entity_id)
+            if entity:
+                entity.update(self.attributes)
 
         if predefined_code:
             device, command = predefined_code.split(":")
@@ -271,13 +274,15 @@ class Broadlink(ExternalClientDevice):
                 self.emit(device, command, "Error")
                 return StatusCodes.BAD_REQUEST
         elif code:
+            if not self._client:
+                _LOG.warning(
+                    "[%s] Cannot send custom command: device not connected", self.log_id
+                )
+                return StatusCodes.SERVICE_UNAVAILABLE
+
             try:
-                if not self._client:
-                    await self.connect()
-                if self._client:
-                    self._client.send_data(code)  # type: ignore[attr-defined]
-                    return StatusCodes.OK
-                return StatusCodes.SERVER_ERROR
+                self._client.send_data(code)  # type: ignore[attr-defined]
+                return StatusCodes.OK
             except (BroadlinkException, OSError) as err:
                 _LOG.warning(
                     "[%s] Custom command failed, attempting reconnect: %s",
@@ -315,10 +320,7 @@ class Broadlink(ExternalClientDevice):
         self.emit(device, command, "Press the button on the remote...")
 
         if not self._client:
-            await self.connect()
-
-        if not self._client:
-            return StatusCodes.SERVER_ERROR
+            return StatusCodes.SERVICE_UNAVAILABLE
 
         try:
             self._client.enter_learning()  # type: ignore[attr-defined]
@@ -373,10 +375,7 @@ class Broadlink(ExternalClientDevice):
             return StatusCodes.BAD_REQUEST
 
         if not self._client:
-            await self.connect()
-
-        if not self._client:
-            return StatusCodes.SERVER_ERROR
+            return StatusCodes.SERVICE_UNAVAILABLE
 
         if not frequency:
             self.emit(device, command, "Hold the button on the remote...")
@@ -468,14 +467,16 @@ class Broadlink(ExternalClientDevice):
         status = self._config_manager.remove_code(
             self.identifier, device.lower(), command.lower()
         )
-        self.events.emit(
-            EVENTS.UPDATE,
-            create_entity_id(EntityTypes.MEDIA_PLAYER, self.identifier),
-            {
-                MediaAttr.MEDIA_TITLE: f"{device}:{command}",
-                MediaAttr.MEDIA_ARTIST: status,
-            },
-        )
+
+        self.attributes.MEDIA_TITLE = f"{device}:{command}"
+        self.attributes.MEDIA_ARTIST = status
+
+        # Update media player entity
+        if self._driver:
+            entity_id = create_entity_id(EntityTypes.MEDIA_PLAYER, self.identifier)
+            entity = self._driver.get_entity_by_id(entity_id)
+            if entity:
+                entity.update(self.attributes)
 
         self.reload_sources()
         return StatusCodes.OK
@@ -483,22 +484,20 @@ class Broadlink(ExternalClientDevice):
     def reload_sources(self) -> None:
         """Reload the sources for the device."""
         _LOG.debug("[%s] Reloading sources for device", self.log_id)
-        self._source_list.clear()
+        source_list = []
         for name, command in self._device_config.data.items():
             for cmd_name, _ in command.items():
-                self._source_list.append(f"{name}:{cmd_name}")
+                source_list.append(f"{name}:{cmd_name}")
+        self.attributes.SOURCE_LIST = source_list
 
     def emit(self, device, command, message, include_source_list=False) -> None:
         """Emit an event."""
-        data = {
-            MediaAttr.MEDIA_TITLE: f"{device}:{command}",
-            MediaAttr.MEDIA_ARTIST: message,
-        }
-        if include_source_list:
-            data[MediaAttr.SOURCE_LIST] = self._source_list
+        self.attributes.MEDIA_TITLE = f"{device}:{command}"
+        self.attributes.MEDIA_ARTIST = message
 
-        self.events.emit(
-            EVENTS.UPDATE,
-            create_entity_id(EntityTypes.MEDIA_PLAYER, self.identifier),
-            data,
-        )
+        # Update media player entity
+        if self._driver:
+            entity_id = create_entity_id(EntityTypes.MEDIA_PLAYER, self.identifier)
+            entity = self._driver.get_entity_by_id(entity_id)
+            if entity:
+                entity.update(self.attributes)
