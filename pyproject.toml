@@ -1,12 +1,12 @@
 [project]
 name = "uc-intg-broadlink"
-version = "1.2.1"
+version = "1.2.2"
 description = "Broadlink integration for Unfolded Circle Remotes"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "pyee>=9.0.0",
-    "ucapi==0.5.1",
+    "ucapi==0.5.2",
     "broadlink==0.19.0",
-    "ucapi-framework==1.8.2",
+    "ucapi-framework==1.9.0",
 ]
