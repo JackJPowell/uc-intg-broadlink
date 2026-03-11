@@ -10,9 +10,10 @@ from typing import Any
 import rm
 import ucapi
 from config_manager import BroadlinkConfig
-from ucapi import EntityTypes, MediaPlayer, media_player
-from ucapi.media_player import Attributes, DeviceClasses
-from ucapi_framework import create_entity_id, Entity
+from ucapi import EntityTypes, media_player
+from ucapi.media_player import DeviceClasses, States
+from ucapi_framework import create_entity_id
+from ucapi_framework.entities import MediaPlayerEntity
 
 _LOG = logging.getLogger(__name__)
 
@@ -22,35 +23,50 @@ features = [
 ]
 
 
-class BroadlinkMediaPlayer(MediaPlayer, Entity):
+class BroadlinkMediaPlayer(MediaPlayerEntity):
     """Representation of a Broadlink MediaPlayer entity."""
 
     def __init__(self, config_device: BroadlinkConfig, device: rm.Broadlink):
         """Initialize the class."""
         self._device = device
         _LOG.debug("Broadlink Media Player init")
-        self.options = []
         super().__init__(
             create_entity_id(EntityTypes.MEDIA_PLAYER, config_device.identifier),
             config_device.name,
             features,
             attributes={
-                Attributes.STATE: "UNKNOWN",
-                Attributes.SOURCE: "",
-                Attributes.SOURCE_LIST: [],
+                media_player.Attributes.STATE: States.UNKNOWN,
+                media_player.Attributes.SOURCE: "",
+                media_player.Attributes.SOURCE_LIST: [],
             },
             device_class=DeviceClasses.RECEIVER,
-            options={media_player.Options.SIMPLE_COMMANDS: self.options},
+            options={media_player.Options.SIMPLE_COMMANDS: []},
             cmd_handler=self.media_player_cmd_handler,
+        )
+        if device is not None:
+            self.subscribe_to_device(device)
+
+    async def sync_state(self) -> None:
+        """Sync entity state from device to Remote."""
+        if self._device is None:
+            return
+        dev_state = self._device.get_state()
+        self.update(
+            {
+                media_player.Attributes.STATE: dev_state.state,
+                media_player.Attributes.SOURCE_LIST: dev_state.source_list,
+                media_player.Attributes.MEDIA_TITLE: dev_state.media_title,
+                media_player.Attributes.MEDIA_ARTIST: dev_state.media_artist,
+            }
         )
 
     # pylint: disable=too-many-statements
     async def media_player_cmd_handler(
         self,
-        entity: MediaPlayer,
+        entity: MediaPlayerEntity,
         cmd_id: str,
         params: dict[str, Any] | None = None,
-        options: Any | None = None,
+        _options: Any | None = None,
     ) -> ucapi.StatusCodes:
         """
         Media-player entity command handler.
@@ -63,6 +79,10 @@ class BroadlinkMediaPlayer(MediaPlayer, Entity):
         :param options: optional command options
         :return: status code of the command. StatusCodes.OK if the command succeeded.
         """
+        if self._device is None:
+            _LOG.warning("No Broadlink instance for entity: %s", entity.id)
+            return ucapi.StatusCodes.SERVICE_UNAVAILABLE
+
         _LOG.info(
             "Got %s command request: %s %s", entity.id, cmd_id, params if params else ""
         )
@@ -76,9 +96,6 @@ class BroadlinkMediaPlayer(MediaPlayer, Entity):
                 case media_player.Commands.SELECT_SOUND_MODE:
                     pass
                 # --- simple commands ---
-
-            # Update entity with latest device attributes
-            self.update(self._device.get_device_attributes(entity.id))
 
         except Exception as ex:  # pylint: disable=broad-except
             _LOG.error("Error executing command %s: %s", cmd_id, ex)

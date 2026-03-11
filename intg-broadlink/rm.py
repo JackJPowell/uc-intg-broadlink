@@ -7,17 +7,15 @@ import asyncio
 import logging
 from asyncio import AbstractEventLoop
 from base64 import b64decode, b64encode
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 import broadlink
 from broadlink.exceptions import BroadlinkException, ReadError, StorageError
-from ucapi import EntityTypes, StatusCodes
+from ucapi import StatusCodes
 from ucapi.media_player import States as PowerState
-from ucapi.remote import Attributes as RemoteAttributes
 from ucapi_framework import (
     BaseIntegrationDriver,
-    MediaPlayerAttributes,
-    create_entity_id,
 )
 from ucapi_framework.device import ExternalClientDevice
 
@@ -26,6 +24,16 @@ from config_manager import BroadlinkConfig, BroadlinkConfigManager
 _LOG = logging.getLogger(__name__)
 
 LEARNING_TIMEOUT = timedelta(seconds=30)
+
+
+@dataclass
+class BroadlinkDeviceState:
+    """Shared device state for all entities associated with a Broadlink device."""
+
+    state: PowerState = PowerState.OFF
+    media_title: str = ""
+    media_artist: str = ""
+    source_list: list[str] = field(default_factory=list)
 
 
 class Broadlink(ExternalClientDevice):
@@ -48,13 +56,7 @@ class Broadlink(ExternalClientDevice):
         )
         self._device_config: BroadlinkConfig
         self._config_manager: BroadlinkConfigManager  # Type narrowing from base class
-        self.attributes = MediaPlayerAttributes(
-            STATE=PowerState.OFF,
-            SOURCE=None,
-            SOURCE_LIST=[],
-            MEDIA_TITLE="",
-            MEDIA_ARTIST="",
-        )
+        self._state = BroadlinkDeviceState()
 
     @property
     def identifier(self) -> str:
@@ -82,19 +84,9 @@ class Broadlink(ExternalClientDevice):
         """Return the device IP address."""
         return self._device_config.address
 
-    def get_device_attributes(self, entity_id: str) -> MediaPlayerAttributes | dict:
-        """
-        Provide entity-specific attributes for the given entity.
-
-        :param entity_id: Entity identifier to get attributes for
-        :return: MediaPlayerAttributes instance or dict with STATE only for remote/ir_emitter
-        """
-        # Remote and IR Emitter entities only need STATE
-        if entity_id.startswith("remote.") or entity_id.startswith("ir_emitter."):
-            return {RemoteAttributes.STATE: self.attributes.STATE}
-
-        # Media player gets full attributes
-        return self.attributes
+    def get_state(self) -> BroadlinkDeviceState:
+        """Return the shared device state for all entities to read from."""
+        return self._state
 
     async def create_client(self) -> broadlink.Device:
         """Create and discover the Broadlink client."""
@@ -174,14 +166,16 @@ class Broadlink(ExternalClientDevice):
                     )
                     self.update_config(address=current_ip)
 
-        self.attributes.STATE = PowerState.ON
+        self._state.state = PowerState.ON
         _LOG.debug("[%s] Device authenticated and ready", self.log_id)
         self.reload_sources()
+        self.push_update()
 
     async def disconnect_client(self) -> None:
         """Disconnect from the Broadlink device."""
         _LOG.debug("[%s] Disconnecting from Broadlink device", self.log_id)
-        self.attributes.STATE = PowerState.OFF
+        self._state.state = PowerState.OFF
+        self.push_update()
         # Broadlink doesn't have an explicit disconnect method
         # The client object will be cleaned up by the parent class
 
@@ -192,7 +186,7 @@ class Broadlink(ExternalClientDevice):
             return False
 
         # Check if state is ON
-        if self.attributes.STATE != PowerState.ON:
+        if self._state.state != PowerState.ON:
             return False
 
         # Verify client has been authenticated by checking for MAC address
@@ -213,15 +207,9 @@ class Broadlink(ExternalClientDevice):
             return StatusCodes.SERVICE_UNAVAILABLE
 
         # Clear media title/artist
-        self.attributes.MEDIA_TITLE = ""
-        self.attributes.MEDIA_ARTIST = ""
-
-        # Update media player entity with cleared values
-        if self._driver:
-            entity_id = create_entity_id(EntityTypes.MEDIA_PLAYER, self.identifier)
-            entity = self._driver.get_entity_by_id(entity_id)
-            if entity:
-                entity.update(self.attributes)
+        self._state.media_title = ""
+        self._state.media_artist = ""
+        self.push_update()
 
         if predefined_code:
             device, command = predefined_code.split(":")
@@ -468,17 +456,11 @@ class Broadlink(ExternalClientDevice):
             self.identifier, device.lower(), command.lower()
         )
 
-        self.attributes.MEDIA_TITLE = f"{device}:{command}"
-        self.attributes.MEDIA_ARTIST = status
-
-        # Update media player entity
-        if self._driver:
-            entity_id = create_entity_id(EntityTypes.MEDIA_PLAYER, self.identifier)
-            entity = self._driver.get_entity_by_id(entity_id)
-            if entity:
-                entity.update(self.attributes)
+        self._state.media_title = f"{device}:{command}"
+        self._state.media_artist = status
 
         self.reload_sources()
+        self.push_update()
         return StatusCodes.OK
 
     def reload_sources(self) -> None:
@@ -488,16 +470,10 @@ class Broadlink(ExternalClientDevice):
         for name, command in self._device_config.data.items():
             for cmd_name, _ in command.items():
                 source_list.append(f"{name}:{cmd_name}")
-        self.attributes.SOURCE_LIST = source_list
+        self._state.source_list = source_list
 
     def emit(self, device, command, message, include_source_list=False) -> None:
         """Emit an event."""
-        self.attributes.MEDIA_TITLE = f"{device}:{command}"
-        self.attributes.MEDIA_ARTIST = message
-
-        # Update media player entity
-        if self._driver:
-            entity_id = create_entity_id(EntityTypes.MEDIA_PLAYER, self.identifier)
-            entity = self._driver.get_entity_by_id(entity_id)
-            if entity:
-                entity.update(self.attributes)
+        self._state.media_title = f"{device}:{command}"
+        self._state.media_artist = message
+        self.push_update()

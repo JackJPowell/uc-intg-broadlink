@@ -7,14 +7,16 @@ Remote entity functions.
 import logging
 from typing import Any
 
-from rm import Broadlink
 from config_manager import BroadlinkConfig
 from ir_converter import convert_to_broadlink
-from ucapi import EntityTypes, StatusCodes, Entity
+from rm import Broadlink
+from ucapi import StatusCodes, ir_emitter
+from ucapi.entity import EntityTypes
 from ucapi.media_player import States as MediaStates
-from ucapi.remote import Attributes, Commands
+from ucapi.remote import Commands
 from ucapi.remote import States as RemoteStates
-from ucapi_framework import create_entity_id, Entity as FrameworkEntity
+from ucapi_framework import create_entity_id
+from ucapi_framework.entities import IREmitterEntity
 
 _LOG = logging.getLogger(__name__)
 
@@ -28,29 +30,38 @@ BROADLINK_REMOTE_STATE_MAPPING = {
 }
 
 
-class BroadlinkIREmitter(Entity, FrameworkEntity):
+class BroadlinkIREmitter(IREmitterEntity):
     """Representation of a Broadlink IR Emitter entity."""
 
     def __init__(self, config_device: BroadlinkConfig, device: Broadlink):
         """Initialize the class."""
         self._device = device
         _LOG.debug("Broadlink IR Emitter init")
-        features = ["send_ir"]
-        self._entity_id: str = create_entity_id("ir_emitter", config_device.identifier)
         super().__init__(
-            self._entity_id,
+            create_entity_id(EntityTypes.IR_EMITTER, config_device.identifier),
             f"{config_device.name} IR Emitter",
-            EntityTypes.IR_EMITTER,
-            features,
+            [ir_emitter.Features.SEND_IR],
             attributes={
-                Attributes.STATE: "UNKNOWN",
+                ir_emitter.Attributes.STATE: ir_emitter.States.UNKNOWN,
             },
             options={
-                "ir_formats": ["PRONTO", "HEX"],
-                "ports": [{"id": "main", "name": "Main"}],
+                ir_emitter.Options.IR_FORMATS: ["PRONTO", "HEX"],
+                ir_emitter.Options.PORTS: [{"id": "main", "name": "Main"}],
             },
             cmd_handler=self.command_handler,
         )
+        if device is not None:
+            self.subscribe_to_device(device)
+
+    async def sync_state(self) -> None:
+        """Sync entity state from device to Remote."""
+        if self._device is None:
+            return
+        dev_state = self._device.get_state()
+        mapped = BROADLINK_REMOTE_STATE_MAPPING.get(
+            dev_state.state, RemoteStates.UNKNOWN
+        )
+        self.update({ir_emitter.Attributes.STATE: mapped})
 
     def get_int_param(self, param: str, params: dict[str, Any], default: int):
         """Get parameter in integer format."""
@@ -65,7 +76,7 @@ class BroadlinkIREmitter(Entity, FrameworkEntity):
 
     async def command_handler(
         self,
-        _entity: Entity,
+        _entity: IREmitterEntity,
         cmd_id: str,
         params: dict[str, Any] | None = None,
         _options: Any | None = None,
@@ -82,10 +93,10 @@ class BroadlinkIREmitter(Entity, FrameworkEntity):
         :return: status code of the command request
         """
         repeat = 1
-        _LOG.info("Got %s command request: %s %s", self._entity_id, cmd_id, params)
+        _LOG.info("Got %s command request: %s %s", self.id, cmd_id, params)
 
         if self._device is None:
-            _LOG.warning("No Broadlink instance for entity: %s", self._entity_id)
+            _LOG.warning("No Broadlink instance for entity: %s", self.id)
             return StatusCodes.SERVICE_UNAVAILABLE
 
         if params:
@@ -94,9 +105,6 @@ class BroadlinkIREmitter(Entity, FrameworkEntity):
         try:
             for _i in range(0, repeat):
                 await self.handle_command(cmd_id, params)
-
-            # Update entity with latest device attributes
-            self.update(self._device.get_device_attributes(self._entity_id))
         except Exception as ex:  # pylint: disable=broad-except
             _LOG.error("Error executing command %s: %s", cmd_id, ex)
             return StatusCodes.BAD_REQUEST

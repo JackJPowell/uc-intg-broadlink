@@ -9,11 +9,13 @@ from typing import Any
 
 from rm import Broadlink
 from config_manager import BroadlinkConfig
-from ucapi import EntityTypes, Remote, StatusCodes
+from ucapi import EntityTypes, StatusCodes
 from ucapi.media_player import States as MediaStates
-from ucapi.remote import Attributes, Commands, Features
+from ucapi.remote import Commands, Features
 from ucapi.remote import States as RemoteStates
-from ucapi_framework import create_entity_id, Entity
+from ucapi import remote
+from ucapi_framework import create_entity_id
+from ucapi_framework.entities import RemoteEntity
 
 _LOG = logging.getLogger(__name__)
 
@@ -27,7 +29,7 @@ BROADLINK_REMOTE_STATE_MAPPING = {
 }
 
 
-class BroadlinkRemote(Remote, Entity):
+class BroadlinkRemote(RemoteEntity):
     """Representation of a Broadlink Remote entity."""
 
     def __init__(self, config_device: BroadlinkConfig, device: Broadlink):
@@ -40,10 +42,22 @@ class BroadlinkRemote(Remote, Entity):
             f"{config_device.name} Remote",
             features,
             attributes={
-                Attributes.STATE: "UNKNOWN",
+                remote.Attributes.STATE: RemoteStates.UNKNOWN,
             },
             cmd_handler=self.command_handler,
         )
+        if device is not None:
+            self.subscribe_to_device(device)
+
+    async def sync_state(self) -> None:
+        """Sync entity state from device to Remote."""
+        if self._device is None:
+            return
+        dev_state = self._device.get_state()
+        mapped = BROADLINK_REMOTE_STATE_MAPPING.get(
+            dev_state.state, RemoteStates.UNKNOWN
+        )
+        self.update({remote.Attributes.STATE: mapped})
 
     def get_int_param(self, param: str, params: dict[str, Any], default: int):
         """Get parameter in integer format."""
@@ -58,10 +72,10 @@ class BroadlinkRemote(Remote, Entity):
 
     async def command_handler(
         self,
-        entity: Remote,
+        _entity: RemoteEntity,
         cmd_id: str,
         params: dict[str, Any] | None = None,
-        options: Any | None = None,
+        _options: Any | None = None,
     ) -> StatusCodes:
         """
         Remote entity command handler.

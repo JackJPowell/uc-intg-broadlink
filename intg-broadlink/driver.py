@@ -36,7 +36,7 @@ async def main():
         entity_classes=[
             BroadlinkMediaPlayer,
             BroadlinkRemote,
-            lambda cfg, dev: BroadlinkIREmitter(cfg, dev),
+            BroadlinkIREmitter,
         ],
         driver_id="broadlink_driver",
         require_connection_before_registry=True,
