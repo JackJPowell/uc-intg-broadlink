@@ -22,6 +22,10 @@ class BroadlinkConfig:
     """IP Address of device"""
     data: dict[str, dict[str, str]]
     """List of codes for the device, if any."""
+    remote_address: str | None = None
+    """Unfolded Circle Remote API address used for IR conversion."""
+    remote_api_key: str | None = None
+    """API key used to access the Unfolded Circle Remote conversion API."""
 
 
 class BroadlinkConfigManager(BaseConfigManager[BroadlinkConfig]):

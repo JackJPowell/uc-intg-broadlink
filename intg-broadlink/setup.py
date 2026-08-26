@@ -17,6 +17,7 @@ from ucapi import (
     SetupError,
 )
 from ucapi_framework import BaseSetupFlow
+from unfurled import Remote, discover_remotes
 
 _LOG = logging.getLogger(__name__)
 
@@ -61,6 +62,119 @@ class BroadlinkSetupFlow(BaseSetupFlow[BroadlinkConfig]):
                 },
             ],
         )
+
+    async def get_additional_configuration_screen(
+        self,
+        device_config: BroadlinkConfig,
+        previous_input: dict[str, Any],
+        error_message: str | None = None,
+    ) -> RequestUserInput:
+        """Discover a Remote, then request its PIN for temporary authentication."""
+        try:
+            remotes = await discover_remotes()
+        except Exception as err:  # pylint: disable=broad-except
+            _LOG.warning(
+                "Remote discovery failed; allowing manual address entry: %s", err
+            )
+            remotes = []
+        pin_field = {
+            "id": "remote_pin",
+            "label": {"en": "Remote PIN"},
+            "field": {"password": {"value": ""}},
+        }
+        error_field = (
+            [
+                {
+                    "id": "authentication_error",
+                    "label": {"en": "Authentication failed"},
+                    "field": {"label": {"value": {"en": error_message}}},
+                }
+            ]
+            if error_message
+            else []
+        )
+
+        if remotes:
+            remote_items = [
+                {
+                    "id": remote.api_url,
+                    "label": {
+                        "en": f"{remote.name.split('-', maxsplit=1)[0]} ({remote.host})"
+                    },
+                }
+                for remote in remotes
+            ]
+            return RequestUserInput(
+                {"en": "Remote API access"},
+                error_field
+                + [
+                    {
+                        "id": "remote_address",
+                        "label": {"en": "Remote"},
+                        "field": {
+                            "dropdown": {
+                                "value": remote_items[0]["id"],
+                                "items": remote_items,
+                            }
+                        },
+                    },
+                    pin_field,
+                ],
+            )
+
+        _LOG.info("No Unfolded Circle Remotes discovered; requesting manual address")
+        return RequestUserInput(
+            {"en": "Remote API access"},
+            error_field
+            + [
+                {
+                    "id": "remote_address",
+                    "label": {"en": "Remote API Address"},
+                    "field": {
+                        "text": {
+                            "value": device_config.remote_address or "",
+                        }
+                    },
+                },
+                pin_field,
+            ],
+        )
+
+    async def handle_additional_configuration_response(
+        self, msg: Any
+    ) -> SetupError | RequestUserInput | None:
+        """Create and retain a Remote API key; never persist the supplied PIN."""
+        if self._pending_device_config is None:
+            return SetupError(error_type=IntegrationSetupError.OTHER)
+
+        remote_address = str(msg.input_values.get("remote_address", "")).strip()
+        pin = str(msg.input_values.get("remote_pin", "")).strip()
+        if not remote_address or not pin:
+            _LOG.warning("Remote API address or PIN was not supplied")
+            return await self.get_additional_configuration_screen(
+                self._pending_device_config, msg.input_values
+            )
+
+        remote = Remote(remote_address, pin=pin)
+        try:
+            self._pending_device_config.remote_api_key = await remote.auth.generate_key(
+                "broadlink_integration"
+            )
+            self._pending_device_config.remote_address = remote_address
+        except Exception as err:  # pylint: disable=broad-except
+            _LOG.warning("Unable to create Remote API key: %s", err)
+            return await self.get_additional_configuration_screen(
+                self._pending_device_config,
+                msg.input_values,
+                (
+                    "Unable to authenticate with the Remote: "
+                    f"{err}. Check the selected Remote and PIN, then try again."
+                ),
+            )
+        finally:
+            await remote.close()
+
+        return None
 
     async def query_device(
         self, input_values: dict[str, Any]

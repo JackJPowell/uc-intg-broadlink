@@ -5,10 +5,11 @@ Remote entity functions.
 """
 
 import logging
+import re
 from typing import Any
 
 from config_manager import BroadlinkConfig
-from ir_converter import convert_to_broadlink
+from ir_converter import convert_to_broadlink, pulses_to_broadlink_data
 from rm import Broadlink
 from ucapi import StatusCodes, ir_emitter
 from ucapi.entity import EntityTypes
@@ -17,6 +18,7 @@ from ucapi.remote import Commands
 from ucapi.remote import States as RemoteStates
 from ucapi_framework import create_entity_id
 from ucapi_framework.entities import IREmitterEntity
+from unfurled import Remote
 
 _LOG = logging.getLogger(__name__)
 
@@ -36,6 +38,8 @@ class BroadlinkIREmitter(IREmitterEntity):
     def __init__(self, config_device: BroadlinkConfig, device: Broadlink):
         """Initialize the class."""
         self._device = device
+        self._remote_address = config_device.remote_address
+        self._remote_api_key = config_device.remote_api_key
         _LOG.debug("Broadlink IR Emitter init")
         super().__init__(
             create_entity_id(EntityTypes.IR_EMITTER, config_device.identifier),
@@ -125,7 +129,7 @@ class BroadlinkIREmitter(IREmitterEntity):
         if cmd_id == "send_ir":
             code_param = params.get("code") if params else None
             if code_param:
-                code = convert_to_broadlink(code_param)
+                code = await self._convert_ir_code(code_param)
                 return await self._device.send_command(code=code)
             return StatusCodes.BAD_REQUEST
 
@@ -152,6 +156,38 @@ class BroadlinkIREmitter(IREmitterEntity):
 
         # send "raw" commands as is to the receiver
         return await self._device.send_command(code=cmd_id)
+
+    async def _convert_ir_code(self, code: Any) -> bytes:
+        """Convert IR input, delegating Remote-supported formats when possible."""
+        remote_format = self._get_remote_ir_format(code)
+        if self._remote_api_key and self._remote_address and remote_format:
+            remote = Remote(self._remote_address, api_key=self._remote_api_key)
+            try:
+                converted = await remote.ir.convert(code, format=remote_format)
+                raw = converted.get("raw")
+                if not isinstance(raw, list) or not all(
+                    isinstance(timing, int) and not isinstance(timing, bool)
+                    for timing in raw
+                ):
+                    raise ValueError("Remote returned invalid raw IR timings")
+                return pulses_to_broadlink_data(raw)
+            finally:
+                await remote.close()
+
+        return convert_to_broadlink(code)
+
+    @staticmethod
+    def _get_remote_ir_format(code: Any) -> str | None:
+        """Return the Remote conversion format for supported IR input."""
+        if not isinstance(code, str):
+            return None
+
+        normalized = code.strip()
+        if normalized.startswith("0000"):
+            return "PRONTO"
+        if re.fullmatch(r"\d+;0x[0-9A-Fa-f]+;\d+;\d+", normalized):
+            return "HEX"
+        return None
 
     @staticmethod
     def _get_command_or_status_code(cmd_id: str, command: str) -> str | StatusCodes:
