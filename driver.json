@@ -1,6 +1,6 @@
 {
   "driver_id": "broadlink_driver",
-  "version": "1.2.3",
+  "version": "1.3.0",
   "min_core_api": "0.20.0",
   "name": { "en": "Broadlink" },
   "icon": "uc:wave-pulse",
@@ -39,5 +39,5 @@
       }
     ]
   },
-  "release_date": "2026-04-10"
+  "release_date": "2026-08-26"
 }
